@@ -72,6 +72,8 @@ ATinyCharacter::ATinyCharacter()
     GetCharacterMovement()->AirControl = .35f;
     GetCharacterMovement()->MaxAcceleration = 1800.f;
     GetCharacterMovement()->BrakingDecelerationWalking = 1800.f;
+    GetCharacterMovement()->MaxWalkSpeedCrouched = 220.f;
+    GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
     bUseControllerRotationYaw = false;
     GetCharacterMovement()->bOrientRotationToMovement = true;
 
@@ -104,6 +106,8 @@ void ATinyCharacter::SetupPlayerInputComponent(UInputComponent* Input)
     Input->BindAxis("LookUp", this, &APawn::AddControllerPitchInput);
     Input->BindAction("Jump", IE_Pressed, this, &ATinyCharacter::JumpPressed);
     Input->BindAction("Jump", IE_Released, this, &ATinyCharacter::JumpReleased);
+    Input->BindAction("Crouch", IE_Pressed, this, &ATinyCharacter::CrouchPressed);
+    Input->BindAction("Crouch", IE_Released, this, &ATinyCharacter::CrouchReleased);
     Input->BindAction("Restart", IE_Pressed, this, &ATinyCharacter::RestartRun);
 }
 
@@ -111,6 +115,8 @@ void ATinyCharacter::Forward(float V) { if (Controller && V) { AddMovementInput(
 void ATinyCharacter::Right(float V) { if (Controller && V) { AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::Y), V); bMoved = true; } }
 void ATinyCharacter::JumpPressed() { JumpBufferRemaining = .12f; }
 void ATinyCharacter::JumpReleased() { StopJumping(); }
+void ATinyCharacter::CrouchPressed() { Crouch(); }
+void ATinyCharacter::CrouchReleased() { UnCrouch(); }
 void ATinyCharacter::Landed(const FHitResult& Hit) { Super::Landed(Hit); CoyoteRemaining = .12f; }
 void ATinyCharacter::Tick(float Dt)
 {

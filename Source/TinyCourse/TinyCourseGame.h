@@ -43,6 +43,8 @@ private:
     void Right(float Value);
     void JumpPressed();
     void JumpReleased();
+    void CrouchPressed();
+    void CrouchReleased();
     void RestartRun();
     float CoyoteRemaining = 0.f;
     float JumpBufferRemaining = 0.f;
