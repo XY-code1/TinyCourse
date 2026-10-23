@@ -179,33 +179,31 @@ AStoneDoor::AStoneDoor()
     PrimaryActorTick.bCanEverTick = true;
     Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
     RootComponent = Root;
-    auto Part = [this](const TCHAR* Name, FVector Location, FVector Scale)
-    {
-        auto* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(Name);
-        Mesh->SetupAttachment(Root);
-        Mesh->SetStaticMesh(CubeMesh());
-        Mesh->SetRelativeLocation(Location);
-        Mesh->SetRelativeScale3D(Scale);
-        return Mesh;
-    };
-    LeftLeaf = Part(TEXT("LeftDoorLeaf"), FVector(0,-90,0), FVector(.28f,1.75f,4.f));
-    RightLeaf = Part(TEXT("RightDoorLeaf"), FVector(0,90,0), FVector(.28f,1.75f,4.f));
-    LeftFrame = Part(TEXT("LeftStoneFrame"), FVector(0,-225,0), FVector(.65f,.7f,5.f));
-    RightFrame = Part(TEXT("RightStoneFrame"), FVector(0,225,0), FVector(.65f,.7f,5.f));
-    Lintel = Part(TEXT("StoneLintel"), FVector(0,0,235), FVector(.7f,5.2f,.7f));
-    LeftHinge = Part(TEXT("LeftHinge"), FVector(-38,-190,0), FVector(.18f,.18f,3.3f));
-    RightHinge = Part(TEXT("RightHinge"), FVector(-38,190,0), FVector(.18f,.18f,3.3f));
-    LockIndicator = Part(TEXT("LockIndicator"), FVector(-42,0,35), FVector(.15f,.42f,.42f));
+    LeftHinge = CreateDefaultSubobject<USceneComponent>(TEXT("LeftHinge"));
+    LeftHinge->SetupAttachment(Root); LeftHinge->SetRelativeLocation(FVector(0,-176,-200));
+    RightHinge = CreateDefaultSubobject<USceneComponent>(TEXT("RightHinge"));
+    RightHinge->SetupAttachment(Root); RightHinge->SetRelativeLocation(FVector(0,176,-200));
+
+    LeftLeaf = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftDoorLeaf"));
+    LeftLeaf->SetupAttachment(LeftHinge);
+    LeftLeaf->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Art/Doors/AncientDoubleDoor/door_B_02.door_B_02")));
+    LeftLeaf->SetRelativeRotation(FRotator(0,90,0)); LeftLeaf->SetRelativeScale3D(FVector(1.6f,1.6f,1.08f));
+    RightLeaf = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightDoorLeaf"));
+    RightLeaf->SetupAttachment(RightHinge);
+    RightLeaf->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Art/Doors/AncientDoubleDoor/door_B_01.door_B_01")));
+    RightLeaf->SetRelativeRotation(FRotator(0,90,0)); RightLeaf->SetRelativeScale3D(FVector(1.6f,1.6f,1.08f));
+    if (auto* Mat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Art/Doors/AncientDoubleDoor/M_AncientDoubleDoor_PBR.M_AncientDoubleDoor_PBR")))
+    { LeftLeaf->SetMaterial(0, Mat); RightLeaf->SetMaterial(0, Mat); }
+
+    LockLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("LockRuneLight"));
+    LockLight->SetupAttachment(Root); LockLight->SetRelativeLocation(FVector(-55,0,35));
+    LockLight->SetIntensity(180.f); LockLight->SetAttenuationRadius(170.f); LockLight->SetLightColor(FLinearColor(.65f,.01f,.01f));
 }
 void AStoneDoor::BeginPlay()
 {
     Super::BeginPlay();
-    LeftClosed = LeftLeaf->GetRelativeLocation(); RightClosed = RightLeaf->GetRelativeLocation();
-    const FLinearColor Stone(.62f,.65f,.68f), Metal(.07f,.08f,.1f);
-    Paint(LeftLeaf, Stone); Paint(RightLeaf, Stone); Paint(LeftFrame, Stone); Paint(RightFrame, Stone); Paint(Lintel, Stone);
-    Paint(LeftHinge, Metal); Paint(RightHinge, Metal); Paint(LockIndicator, FLinearColor(.9f,.03f,.02f));
 }
-void AStoneDoor::Open() { if (!bOpening) { OpenElapsed = 0.f; bOpening = true; Paint(LockIndicator, FLinearColor(.03f,1.f,.2f)); } }
+void AStoneDoor::Open() { if (!bOpening) { OpenElapsed = 0.f; bOpening = true; LockLight->SetLightColor(FLinearColor(.01f,.8f,.08f)); } }
 void AStoneDoor::Tick(float Dt)
 {
     Super::Tick(Dt);
@@ -213,8 +211,8 @@ void AStoneDoor::Tick(float Dt)
     OpenElapsed += Dt;
     const float Alpha = FMath::Clamp(OpenElapsed / 1.5f, 0.f, 1.f);
     const float Smooth = FMath::InterpEaseInOut(0.f, 1.f, Alpha, 2.f);
-    LeftLeaf->SetRelativeLocation(FMath::Lerp(LeftClosed, LeftClosed + FVector(0,-215,0), Smooth));
-    RightLeaf->SetRelativeLocation(FMath::Lerp(RightClosed, RightClosed + FVector(0,215,0), Smooth));
+    LeftHinge->SetRelativeRotation(FRotator(0, -85.f * Smooth, 0));
+    RightHinge->SetRelativeRotation(FRotator(0, 85.f * Smooth, 0));
     if (Alpha >= 1.f)
     {
         bOpening = false;
