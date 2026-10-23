@@ -5,5 +5,9 @@
   "Description": "A tiny third-person obstacle course built entirely from C++ and engine primitives.",
   "Modules": [
     { "Name": "TinyCourse", "Type": "Runtime", "LoadingPhase": "Default" }
+  ],
+  "Plugins": [
+    { "Name": "PythonScriptPlugin", "Enabled": true },
+    { "Name": "EditorScriptingUtilities", "Enabled": true }
   ]
 }

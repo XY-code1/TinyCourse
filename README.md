@@ -1,21 +1,27 @@
-# Tiny Course
+# TinyCourse — Floating Ruins Stage A
 
-Small Unreal Engine 5.7 third-person obstacle course using only C++ and built-in engine meshes.
+Unreal Engine 5.7 third-person course prototype on the `revamp/experience-pass` branch.
 
-## Included
+## Current playable loop
 
-- WASD movement, mouse camera and jumping
-- five rotating collectibles
-- moving platform and two hazards
-- respawn on failure
-- timer, death counter and HUD messages
-- locked finish gate and restart key
-
-## Open and package
-
-1. Install Unreal Engine 5.7 and the Visual Studio 2022 **Game development with C++** workload.
-2. Right-click `TinyCourse.uproject` and choose **Generate Visual Studio project files**.
-3. Open the project, allow it to compile, then press Play.
-4. Use **Platforms > Windows > Package Project** and choose an output folder.
+1. Start on the central safe island.
+2. Complete Route A (blue jumps) and collect core 1.
+3. Complete Route B (yellow mandatory moving platform) and collect core 2.
+4. Activate the Route C checkpoint, cross the red-orange hazards, and collect core 3.
+5. Return to the central pressure plate.
+6. Open the locked gate and enter the purple goal portal.
 
 Controls: `WASD`, mouse, `Space`, `R`.
+
+## Map
+
+The project-owned default map is `/Game/Maps/L_FloatingRuins`.
+It contains saved level actors and no longer depends on `BuildCourse()` for the formal course.
+
+The editor-generation source is `Scripts/build_floating_ruins.py`.
+
+## Stage A scope
+
+Included: formal saved map, three spatially distinct routes, three cores, mandatory moving platform, hazard/checkpoint route, locked gate, pressure plate, goal and in-engine audit captures.
+
+Deferred: final skeletal character and animations, production UI, audio, particles, final art and Windows packaging.

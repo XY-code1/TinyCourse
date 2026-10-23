@@ -14,6 +14,20 @@ class USphereComponent;
 class UBoxComponent;
 
 UCLASS()
+class TINYCOURSE_API ACourseBlock : public AActor
+{
+    GENERATED_BODY()
+public:
+    ACourseBlock();
+    virtual void OnConstruction(const FTransform& Transform) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Course") FLinearColor BlockColor = FLinearColor(.35f, .32f, .28f);
+private:
+    UPROPERTY() UStaticMeshComponent* Mesh;
+protected:
+    virtual void BeginPlay() override;
+};
+
+UCLASS()
 class TINYCOURSE_API ATinyCharacter : public ACharacter
 {
     GENERATED_BODY()
@@ -35,6 +49,7 @@ class TINYCOURSE_API APickup : public AActor
 public:
     APickup();
 protected:
+    virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
@@ -49,6 +64,8 @@ class TINYCOURSE_API AHazard : public AActor
     GENERATED_BODY()
 public:
     AHazard();
+protected:
+    virtual void BeginPlay() override;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
     UFUNCTION() void Hit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -75,6 +92,7 @@ class TINYCOURSE_API AStoneDoor : public AActor
     GENERATED_BODY()
 public:
     AStoneDoor();
+    virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
     void Open();
 private:
@@ -89,6 +107,9 @@ class TINYCOURSE_API APressurePlate : public AActor
     GENERATED_BODY()
 public:
     APressurePlate();
+    void SetActivated();
+protected:
+    virtual void BeginPlay() override;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
     UFUNCTION() void Pressed(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -102,6 +123,8 @@ class TINYCOURSE_API ACheckpoint : public AActor
     GENERATED_BODY()
 public:
     ACheckpoint();
+protected:
+    virtual void BeginPlay() override;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
     UFUNCTION() void Activated(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -115,6 +138,8 @@ class TINYCOURSE_API AGoal : public AActor
     GENERATED_BODY()
 public:
     AGoal();
+protected:
+    virtual void BeginPlay() override;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
     UFUNCTION() void Reached(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -155,8 +180,14 @@ private:
     FVector Start = FVector(-900, 0, 120);
     FVector RespawnPoint = Start;
     UPROPERTY() AStoneDoor* Door = nullptr;
+    UPROPERTY() APressurePlate* Plate = nullptr;
     TArray<TWeakObjectPtr<APickup>> Pickups;
+    bool bAuditCapture = false;
+    float AuditElapsed = 0.f;
+    float AuditNextStep = 1.f;
+    int32 AuditStep = 0;
     void BuildCourse();
     void SpawnPlayer();
+    void RunAuditStep();
     AActor* Block(FVector Location, FVector Scale, FColor Color);
 };
