@@ -34,12 +34,20 @@ class TINYCOURSE_API ATinyCharacter : public ACharacter
 public:
     ATinyCharacter();
     virtual void SetupPlayerInputComponent(UInputComponent* Input) override;
+    virtual void Tick(float DeltaSeconds) override;
+    virtual void Landed(const FHitResult& Hit) override;
 private:
     UPROPERTY() USpringArmComponent* SpringArm;
     UPROPERTY() UCameraComponent* Camera;
     void Forward(float Value);
     void Right(float Value);
+    void JumpPressed();
+    void JumpReleased();
     void RestartRun();
+    float CoyoteRemaining = 0.f;
+    float JumpBufferRemaining = 0.f;
+    bool bMoved = false;
+    bool bJumped = false;
 };
 
 UCLASS()
@@ -176,6 +184,9 @@ public:
     bool Finished = false;
     bool PlateActivated = false;
     FString Message;
+    FString Objective = TEXT("WASD 绉诲姩");
+    bool bMovementTutorialDone = false;
+    bool bJumpTutorialDone = false;
 private:
     FVector Start = FVector(-900, 0, 120);
     FVector RespawnPoint = Start;

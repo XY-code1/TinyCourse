@@ -3,6 +3,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
@@ -65,44 +66,32 @@ ATinyCharacter::ATinyCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
     GetCapsuleComponent()->SetCapsuleHalfHeight(88.f);
-    GetCharacterMovement()->MaxWalkSpeed = 600.f;
-    GetCharacterMovement()->JumpZVelocity = 700.f;
+    GetCharacterMovement()->MaxWalkSpeed = 450.f;
+    GetCharacterMovement()->JumpZVelocity = 520.f;
+    GetCharacterMovement()->GravityScale = 1.35f;
+    GetCharacterMovement()->AirControl = .35f;
+    GetCharacterMovement()->MaxAcceleration = 1800.f;
+    GetCharacterMovement()->BrakingDecelerationWalking = 1800.f;
     bUseControllerRotationYaw = false;
     GetCharacterMovement()->bOrientRotationToMovement = true;
 
-    auto Part = [this](const TCHAR* Name, UStaticMesh* Shape, FVector Location, FVector Scale,
-                       FLinearColor Color)
+    if (auto* Manny = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple")))
     {
-        auto* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(Name);
-        Mesh->SetupAttachment(GetCapsuleComponent());
-        Mesh->SetStaticMesh(Shape);
-        Mesh->SetRelativeLocation(Location);
-        Mesh->SetRelativeScale3D(Scale);
-        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        Paint(Mesh, Color);
-        return Mesh;
-    };
-
-    // Simple humanoid robot made only from engine primitives, so it works
-    // without downloading a character asset.
-    const FLinearColor Armor(.05f, .25f, .7f);
-    const FLinearColor Joint(.55f, .65f, .75f);
-    Part(TEXT("Torso"),   CubeMesh(),   FVector(0, 0, 22),   FVector(.34f, .44f, .46f), Armor);
-    Part(TEXT("Chest"),   CubeMesh(),   FVector(8, 0, 52),   FVector(.27f, .37f, .17f), Joint);
-    Part(TEXT("Head"),    SphereMesh(), FVector(0, 0, 82),   FVector(.26f), Armor);
-    Part(TEXT("LeftArm"), CubeMesh(),   FVector(0,-52, 25),  FVector(.14f, .14f, .43f), Joint);
-    Part(TEXT("RightArm"),CubeMesh(),   FVector(0, 52, 25),  FVector(.14f, .14f, .43f), Joint);
-    Part(TEXT("LeftHand"),SphereMesh(), FVector(0,-52,-18),  FVector(.16f), Armor);
-    Part(TEXT("RightHand"),SphereMesh(),FVector(0, 52,-18),  FVector(.16f), Armor);
-    Part(TEXT("Pelvis"),  CubeMesh(),   FVector(0, 0,-17),   FVector(.27f, .34f, .18f), Armor);
-    Part(TEXT("LeftLeg"), CubeMesh(),   FVector(0,-20,-57),  FVector(.17f, .17f, .43f), Joint);
-    Part(TEXT("RightLeg"),CubeMesh(),   FVector(0, 20,-57),  FVector(.17f, .17f, .43f), Joint);
+        GetMesh()->SetSkeletalMesh(Manny);
+        GetMesh()->SetRelativeLocation(FVector(0, 0, -88.f));
+        GetMesh()->SetRelativeRotation(FRotator(0, -90.f, 0));
+        if (auto* Anim = LoadClass<UAnimInstance>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed.ABP_Unarmed_C")))
+            GetMesh()->SetAnimInstanceClass(Anim);
+    }
 
     SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
     SpringArm->SetupAttachment(RootComponent);
-    SpringArm->TargetArmLength = 450.f;
+    SpringArm->TargetArmLength = 350.f;
     SpringArm->SetRelativeRotation(FRotator(-20.f, 0.f, 0.f));
     SpringArm->bUsePawnControlRotation = true;
+    SpringArm->bEnableCameraLag = true;
+    SpringArm->CameraLagSpeed = 10.f;
+    SpringArm->bDoCollisionTest = true;
     Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
     Camera->SetupAttachment(SpringArm);
 }
@@ -113,13 +102,28 @@ void ATinyCharacter::SetupPlayerInputComponent(UInputComponent* Input)
     Input->BindAxis("MoveRight", this, &ATinyCharacter::Right);
     Input->BindAxis("Turn", this, &APawn::AddControllerYawInput);
     Input->BindAxis("LookUp", this, &APawn::AddControllerPitchInput);
-    Input->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
-    Input->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
+    Input->BindAction("Jump", IE_Pressed, this, &ATinyCharacter::JumpPressed);
+    Input->BindAction("Jump", IE_Released, this, &ATinyCharacter::JumpReleased);
     Input->BindAction("Restart", IE_Pressed, this, &ATinyCharacter::RestartRun);
 }
 
-void ATinyCharacter::Forward(float V) { if (Controller && V) AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::X), V); }
-void ATinyCharacter::Right(float V) { if (Controller && V) AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::Y), V); }
+void ATinyCharacter::Forward(float V) { if (Controller && V) { AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::X), V); bMoved = true; } }
+void ATinyCharacter::Right(float V) { if (Controller && V) { AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::Y), V); bMoved = true; } }
+void ATinyCharacter::JumpPressed() { JumpBufferRemaining = .12f; }
+void ATinyCharacter::JumpReleased() { StopJumping(); }
+void ATinyCharacter::Landed(const FHitResult& Hit) { Super::Landed(Hit); CoyoteRemaining = .12f; }
+void ATinyCharacter::Tick(float Dt)
+{
+    Super::Tick(Dt);
+    CoyoteRemaining = GetCharacterMovement()->IsMovingOnGround() ? .12f : FMath::Max(0.f, CoyoteRemaining - Dt);
+    JumpBufferRemaining = FMath::Max(0.f, JumpBufferRemaining - Dt);
+    if (JumpBufferRemaining > 0.f && CoyoteRemaining > 0.f) { Jump(); JumpBufferRemaining = 0.f; CoyoteRemaining = 0.f; bJumped = true; }
+    if (auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>())
+    {
+        if (bMoved && !GM->bMovementTutorialDone) { GM->bMovementTutorialDone = true; GM->Objective = TEXT("SPACE  Jump"); }
+        if (bJumped && !GM->bJumpTutorialDone) { GM->bJumpTutorialDone = true; GM->Objective = TEXT("Complete three trials and collect energy cores"); }
+    }
+}
 void ATinyCharacter::RestartRun() { if (auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()) GM->RestartRun(); }
 
 APickup::APickup()
@@ -242,10 +246,9 @@ void ATinyHUD::DrawHUD()
     Super::DrawHUD();
     auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>();
     if (!GM || !Canvas) return;
-    const FString Line = FString::Printf(TEXT("TIME %.1f   CORES %d/%d   FALLS %d   GATE %s"), GM->Time, GM->Collected, GM->Total, GM->Deaths, GM->PlateActivated ? TEXT("OPEN") : TEXT("LOCKED"));
-    DrawText(Line, FLinearColor::White, 40, 35, GEngine->GetLargeFont(), 1.1f, false);
-    DrawText(TEXT("WASD Move   Mouse Look   Space Jump   R Restart"), FLinearColor(.7f,.8f,1), 40, 75);
-    if (!GM->Message.IsEmpty()) DrawText(GM->Message, GM->Finished ? FLinearColor::Green : FLinearColor::Yellow, 40, 115, GEngine->GetLargeFont(), 1.2f, false);
+    DrawText(FString::Printf(TEXT("CORE %d/%d"), GM->Collected, GM->Total), FLinearColor::White, 45, 35, GEngine->GetLargeFont(), 1.1f, false);
+    if (!GM->Objective.IsEmpty()) DrawText(GM->Objective, FLinearColor(.75f,.88f,1), 45, 82, GEngine->GetLargeFont(), 1.f, false);
+    if (!GM->Message.IsEmpty()) DrawText(GM->Message, GM->Finished ? FLinearColor::Green : FLinearColor::Yellow, 45, 128, GEngine->GetLargeFont(), 1.f, false);
 }
 
 ATinyCourseGameMode::ATinyCourseGameMode()
@@ -258,8 +261,7 @@ ATinyCourseGameMode::ATinyCourseGameMode()
 void ATinyCourseGameMode::BeginPlay()
 {
     Super::BeginPlay();
-    if (!GetWorld()->GetMapName().Contains(TEXT("L_FloatingRuins"))) BuildCourse();
-    else
+    if (GetWorld()->GetMapName().Contains(TEXT("L_FloatingRuins")) || GetWorld()->GetMapName().Contains(TEXT("L_RuinsChambers")))
     {
         for (TActorIterator<AStoneDoor> It(GetWorld()); It; ++It) { Door = *It; break; }
         for (TActorIterator<APressurePlate> It(GetWorld()); It; ++It) { Plate = *It; break; }
@@ -389,21 +391,22 @@ void ATinyCourseGameMode::SpawnPlayer()
     else { auto* NewPawn = GetWorld()->SpawnActor<ATinyCharacter>(ATinyCharacter::StaticClass(), Start, FRotator::ZeroRotator); PC->Possess(NewPawn); }
 }
 
-void ATinyCourseGameMode::TakePickup() { ++Collected; Message = FString::Printf(TEXT("Energy core secured: %d/%d"), Collected, Total); }
+void ATinyCourseGameMode::TakePickup() { ++Collected; Message = FString::Printf(TEXT("Energy Core %d/%d"), Collected, Total); Objective = Collected == Total ? TEXT("All cores collected - return to the central hall") : TEXT("Complete three trials and collect energy cores"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CoreCollected %d/%d"), Collected, Total); }
 void ATinyCourseGameMode::PressPlate()
 {
     if (PlateActivated) return;
     if (Collected < Total) { Message = FString::Printf(TEXT("Plate needs %d more energy cores"), Total-Collected); return; }
     PlateActivated = true;
-    Message = TEXT("Pressure plate active - stone gate opening!");
+    Message = TEXT("Pressure plate activated"); Objective = TEXT("Enter the portal to complete the trial"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT PlateActivated DoorOpening"));
     if (Plate) Plate->SetActivated();
     if (Door) Door->Open();
 }
 void ATinyCourseGameMode::ActivateCheckpoint(const FVector& Location)
 {
     RespawnPoint = Location;
-    Message = TEXT("Checkpoint activated");
+    Message = TEXT("Checkpoint activated"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CheckpointActivated %s"), *Location.ToCompactString());
 }
-void ATinyCourseGameMode::Fail() { ++Deaths; Message = TEXT("System reset - checkpoint restored"); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
-void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("Restore all cores and open the stone gate first"); return; } Finished = true; Message = FString::Printf(TEXT("ECHO RUINS COMPLETE!  %.1f seconds  -  Press R"), Time); }
+void ATinyCourseGameMode::Fail() { ++Deaths; Message = TEXT("Trial failed - respawned at checkpoint"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT FailRespawn deaths=%d point=%s"), Deaths, *RespawnPoint.ToCompactString()); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
+void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("Collect all cores and activate the pressure plate"); return; } Finished = true; Objective = TEXT("Trial complete"); Message = FString::Printf(TEXT("RUINS TRIAL COMPLETE  %.1f seconds  Press R to restart"), Time); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT GoalComplete time=%.1f deaths=%d"), Time, Deaths); }
 void ATinyCourseGameMode::RestartRun() { UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()), false); }
+
