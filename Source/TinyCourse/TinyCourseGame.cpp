@@ -4,6 +4,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
@@ -176,23 +177,49 @@ void AMovingPlatform::Tick(float Dt) { Super::Tick(Dt); SetActorLocation(Origin 
 AStoneDoor::AStoneDoor()
 {
     PrimaryActorTick.bCanEverTick = true;
-    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Door"));
-    RootComponent = Mesh;
-    Mesh->SetStaticMesh(CubeMesh());
-    Paint(Mesh, FLinearColor(.8f, .04f, .03f));
+    Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+    RootComponent = Root;
+    auto Part = [this](const TCHAR* Name, FVector Location, FVector Scale)
+    {
+        auto* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+        Mesh->SetupAttachment(Root);
+        Mesh->SetStaticMesh(CubeMesh());
+        Mesh->SetRelativeLocation(Location);
+        Mesh->SetRelativeScale3D(Scale);
+        return Mesh;
+    };
+    LeftLeaf = Part(TEXT("LeftDoorLeaf"), FVector(0,-90,0), FVector(.28f,1.75f,4.f));
+    RightLeaf = Part(TEXT("RightDoorLeaf"), FVector(0,90,0), FVector(.28f,1.75f,4.f));
+    LeftFrame = Part(TEXT("LeftStoneFrame"), FVector(0,-225,0), FVector(.65f,.7f,5.f));
+    RightFrame = Part(TEXT("RightStoneFrame"), FVector(0,225,0), FVector(.65f,.7f,5.f));
+    Lintel = Part(TEXT("StoneLintel"), FVector(0,0,235), FVector(.7f,5.2f,.7f));
+    LeftHinge = Part(TEXT("LeftHinge"), FVector(-38,-190,0), FVector(.18f,.18f,3.3f));
+    RightHinge = Part(TEXT("RightHinge"), FVector(-38,190,0), FVector(.18f,.18f,3.3f));
+    LockIndicator = Part(TEXT("LockIndicator"), FVector(-42,0,35), FVector(.15f,.42f,.42f));
 }
-void AStoneDoor::BeginPlay() { Super::BeginPlay(); Paint(Mesh, FLinearColor(.8f, .04f, .03f)); }
-void AStoneDoor::Open() { ClosedLocation = GetActorLocation(); Paint(Mesh, FLinearColor(.05f, 1.f, .25f)); bOpening = true; }
+void AStoneDoor::BeginPlay()
+{
+    Super::BeginPlay();
+    LeftClosed = LeftLeaf->GetRelativeLocation(); RightClosed = RightLeaf->GetRelativeLocation();
+    const FLinearColor Stone(.62f,.65f,.68f), Metal(.07f,.08f,.1f);
+    Paint(LeftLeaf, Stone); Paint(RightLeaf, Stone); Paint(LeftFrame, Stone); Paint(RightFrame, Stone); Paint(Lintel, Stone);
+    Paint(LeftHinge, Metal); Paint(RightHinge, Metal); Paint(LockIndicator, FLinearColor(.9f,.03f,.02f));
+}
+void AStoneDoor::Open() { if (!bOpening) { OpenElapsed = 0.f; bOpening = true; Paint(LockIndicator, FLinearColor(.03f,1.f,.2f)); } }
 void AStoneDoor::Tick(float Dt)
 {
     Super::Tick(Dt);
     if (!bOpening) return;
-    const FVector Target = ClosedLocation + FVector(0, 0, 500);
-    SetActorLocation(FMath::VInterpConstantTo(GetActorLocation(), Target, Dt, 260.f));
-    if (FVector::DistSquared(GetActorLocation(), Target) < 4.f)
+    OpenElapsed += Dt;
+    const float Alpha = FMath::Clamp(OpenElapsed / 1.5f, 0.f, 1.f);
+    const float Smooth = FMath::InterpEaseInOut(0.f, 1.f, Alpha, 2.f);
+    LeftLeaf->SetRelativeLocation(FMath::Lerp(LeftClosed, LeftClosed + FVector(0,-215,0), Smooth));
+    RightLeaf->SetRelativeLocation(FMath::Lerp(RightClosed, RightClosed + FVector(0,215,0), Smooth));
+    if (Alpha >= 1.f)
     {
         bOpening = false;
-        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        LeftLeaf->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        RightLeaf->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     }
 }
 

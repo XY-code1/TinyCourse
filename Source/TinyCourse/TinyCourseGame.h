@@ -106,8 +106,18 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     void Open();
 private:
-    UPROPERTY() UStaticMeshComponent* Mesh;
-    FVector ClosedLocation;
+    UPROPERTY() USceneComponent* Root;
+    UPROPERTY() UStaticMeshComponent* LeftLeaf;
+    UPROPERTY() UStaticMeshComponent* RightLeaf;
+    UPROPERTY() UStaticMeshComponent* LeftFrame;
+    UPROPERTY() UStaticMeshComponent* RightFrame;
+    UPROPERTY() UStaticMeshComponent* Lintel;
+    UPROPERTY() UStaticMeshComponent* LeftHinge;
+    UPROPERTY() UStaticMeshComponent* RightHinge;
+    UPROPERTY() UStaticMeshComponent* LockIndicator;
+    FVector LeftClosed;
+    FVector RightClosed;
+    float OpenElapsed = 0.f;
     bool bOpening = false;
 };
 
