@@ -13,6 +13,7 @@ class UStaticMeshComponent;
 class USphereComponent;
 class UBoxComponent;
 class UPointLightComponent;
+class USpotLightComponent;
 
 UCLASS()
 class TINYCOURSE_API ACourseBlock : public AActor
@@ -113,6 +114,9 @@ private:
     UPROPERTY() UStaticMeshComponent* LeftLeaf;
     UPROPERTY() UStaticMeshComponent* RightLeaf;
     UPROPERTY() UPointLightComponent* LockLight;
+    UPROPERTY() USpotLightComponent* FrontFillLight;
+    UPROPERTY() UPointLightComponent* LeftRimLight;
+    UPROPERTY() UPointLightComponent* RightRimLight;
     float OpenElapsed = 0.f;
     bool bOpening = false;
 };

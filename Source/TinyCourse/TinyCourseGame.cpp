@@ -16,6 +16,7 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
@@ -192,12 +193,28 @@ AStoneDoor::AStoneDoor()
     RightLeaf->SetupAttachment(RightHinge);
     RightLeaf->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Art/Doors/AncientDoubleDoor/door_B_01.door_B_01")));
     RightLeaf->SetRelativeRotation(FRotator(0,90,0)); RightLeaf->SetRelativeScale3D(FVector(1.6f,1.6f,1.08f));
-    if (auto* Mat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Art/Doors/AncientDoubleDoor/M_AncientDoubleDoor_PBR.M_AncientDoubleDoor_PBR")))
-    { LeftLeaf->SetMaterial(0, Mat); RightLeaf->SetMaterial(0, Mat); }
+    if (auto* Mat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Art/Doors/AncientDoubleDoor/Materials/MI_AncientDoubleDoor_Bright.MI_AncientDoubleDoor_Bright")))
+    {
+        for (int32 Slot=0; Slot<LeftLeaf->GetNumMaterials(); ++Slot) LeftLeaf->SetMaterial(Slot, Mat);
+        for (int32 Slot=0; Slot<RightLeaf->GetNumMaterials(); ++Slot) RightLeaf->SetMaterial(Slot, Mat);
+    }
+    LeftLeaf->SetCastShadow(true); RightLeaf->SetCastShadow(true);
 
     LockLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("LockRuneLight"));
     LockLight->SetupAttachment(Root); LockLight->SetRelativeLocation(FVector(-55,0,35));
     LockLight->SetIntensity(180.f); LockLight->SetAttenuationRadius(170.f); LockLight->SetLightColor(FLinearColor(.65f,.01f,.01f));
+
+    FrontFillLight = CreateDefaultSubobject<USpotLightComponent>(TEXT("GateFrontFill"));
+    FrontFillLight->SetupAttachment(Root); FrontFillLight->SetRelativeLocation(FVector(-360,0,110));
+    FrontFillLight->SetRelativeRotation(FRotator(0,0,0)); FrontFillLight->SetIntensity(1800.f);
+    FrontFillLight->SetAttenuationRadius(760.f); FrontFillLight->SetOuterConeAngle(58.f);
+    FrontFillLight->SetLightColor(FLinearColor(1.f,.72f,.48f)); FrontFillLight->SetCastShadows(false);
+    LeftRimLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("GateLeftRim"));
+    LeftRimLight->SetupAttachment(Root); LeftRimLight->SetRelativeLocation(FVector(-70,-205,80));
+    LeftRimLight->SetIntensity(260.f); LeftRimLight->SetAttenuationRadius(280.f); LeftRimLight->SetLightColor(FLinearColor(1.f,.55f,.28f)); LeftRimLight->SetCastShadows(false);
+    RightRimLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("GateRightRim"));
+    RightRimLight->SetupAttachment(Root); RightRimLight->SetRelativeLocation(FVector(-70,205,80));
+    RightRimLight->SetIntensity(260.f); RightRimLight->SetAttenuationRadius(280.f); RightRimLight->SetLightColor(FLinearColor(1.f,.55f,.28f)); RightRimLight->SetCastShadows(false);
 }
 void AStoneDoor::BeginPlay()
 {
