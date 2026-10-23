@@ -1,0 +1,31 @@
+# Unreal generated files
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.idea/
+.vscode/
+*.VC.db
+*.opensdf
+*.sdf
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# Build outputs
+Build/Receipts/
+StagedBuilds/
+Packaged/
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Keep project source and assets
+!Config/
+!Content/
+!Source/
+!Plugins/

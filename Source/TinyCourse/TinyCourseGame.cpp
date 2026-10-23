@@ -1,0 +1,331 @@
+#include "TinyCourseGame.h"
+#include "Camera/CameraComponent.h"
+#include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/Canvas.h"
+#include "Engine/Engine.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Engine/PointLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/PointLightComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Kismet/GameplayStatics.h"
+
+static UStaticMesh* CubeMesh()
+{
+    static UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+    return Mesh;
+}
+
+static UStaticMesh* SphereMesh()
+{
+    static UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+    return Mesh;
+}
+
+static void Paint(UStaticMeshComponent* Mesh, const FLinearColor& Color)
+{
+    auto* Base = LoadObject<UMaterialInterface>(nullptr,
+        TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+    auto* Material = UMaterialInstanceDynamic::Create(Base, Mesh);
+    Material->SetVectorParameterValue(TEXT("Color"), Color);
+    Mesh->SetMaterial(0, Material);
+}
+
+ATinyCharacter::ATinyCharacter()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    GetCapsuleComponent()->SetCapsuleHalfHeight(88.f);
+    GetCharacterMovement()->MaxWalkSpeed = 600.f;
+    GetCharacterMovement()->JumpZVelocity = 700.f;
+    bUseControllerRotationYaw = false;
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+
+    auto Part = [this](const TCHAR* Name, UStaticMesh* Shape, FVector Location, FVector Scale,
+                       FLinearColor Color)
+    {
+        auto* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+        Mesh->SetupAttachment(GetCapsuleComponent());
+        Mesh->SetStaticMesh(Shape);
+        Mesh->SetRelativeLocation(Location);
+        Mesh->SetRelativeScale3D(Scale);
+        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Paint(Mesh, Color);
+        return Mesh;
+    };
+
+    // Simple humanoid robot made only from engine primitives, so it works
+    // without downloading a character asset.
+    const FLinearColor Armor(.05f, .25f, .7f);
+    const FLinearColor Joint(.55f, .65f, .75f);
+    Part(TEXT("Torso"),   CubeMesh(),   FVector(0, 0, 22),   FVector(.34f, .44f, .46f), Armor);
+    Part(TEXT("Chest"),   CubeMesh(),   FVector(8, 0, 52),   FVector(.27f, .37f, .17f), Joint);
+    Part(TEXT("Head"),    SphereMesh(), FVector(0, 0, 82),   FVector(.26f), Armor);
+    Part(TEXT("LeftArm"), CubeMesh(),   FVector(0,-52, 25),  FVector(.14f, .14f, .43f), Joint);
+    Part(TEXT("RightArm"),CubeMesh(),   FVector(0, 52, 25),  FVector(.14f, .14f, .43f), Joint);
+    Part(TEXT("LeftHand"),SphereMesh(), FVector(0,-52,-18),  FVector(.16f), Armor);
+    Part(TEXT("RightHand"),SphereMesh(),FVector(0, 52,-18),  FVector(.16f), Armor);
+    Part(TEXT("Pelvis"),  CubeMesh(),   FVector(0, 0,-17),   FVector(.27f, .34f, .18f), Armor);
+    Part(TEXT("LeftLeg"), CubeMesh(),   FVector(0,-20,-57),  FVector(.17f, .17f, .43f), Joint);
+    Part(TEXT("RightLeg"),CubeMesh(),   FVector(0, 20,-57),  FVector(.17f, .17f, .43f), Joint);
+
+    SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
+    SpringArm->SetupAttachment(RootComponent);
+    SpringArm->TargetArmLength = 450.f;
+    SpringArm->SetRelativeRotation(FRotator(-20.f, 0.f, 0.f));
+    SpringArm->bUsePawnControlRotation = true;
+    Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+    Camera->SetupAttachment(SpringArm);
+}
+
+void ATinyCharacter::SetupPlayerInputComponent(UInputComponent* Input)
+{
+    Input->BindAxis("MoveForward", this, &ATinyCharacter::Forward);
+    Input->BindAxis("MoveRight", this, &ATinyCharacter::Right);
+    Input->BindAxis("Turn", this, &APawn::AddControllerYawInput);
+    Input->BindAxis("LookUp", this, &APawn::AddControllerPitchInput);
+    Input->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
+    Input->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
+    Input->BindAction("Restart", IE_Pressed, this, &ATinyCharacter::RestartRun);
+}
+
+void ATinyCharacter::Forward(float V) { if (Controller && V) AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::X), V); }
+void ATinyCharacter::Right(float V) { if (Controller && V) AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::Y), V); }
+void ATinyCharacter::RestartRun() { if (auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()) GM->RestartRun(); }
+
+APickup::APickup()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Pickup"));
+    RootComponent = Mesh;
+    Mesh->SetStaticMesh(SphereMesh());
+    Mesh->SetWorldScale3D(FVector(.35f));
+    Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    Mesh->SetGenerateOverlapEvents(true);
+    Paint(Mesh, FLinearColor(0.f, .8f, 1.f));
+    Mesh->OnComponentBeginOverlap.AddDynamic(this, &APickup::Collected);
+}
+void APickup::Tick(float Dt) { Super::Tick(Dt); AddActorLocalRotation(FRotator(0, 100.f * Dt, 0)); }
+void APickup::Collected(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&) { if (Cast<ATinyCharacter>(Other)) { GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->TakePickup(); Destroy(); } }
+
+AHazard::AHazard()
+{
+    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Hazard"));
+    RootComponent = Mesh;
+    Mesh->SetStaticMesh(CubeMesh());
+    Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    Mesh->SetGenerateOverlapEvents(true);
+    Paint(Mesh, FLinearColor(.9f, .03f, .02f));
+    Mesh->OnComponentBeginOverlap.AddDynamic(this, &AHazard::Hit);
+}
+void AHazard::Hit(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&) { if (Cast<ATinyCharacter>(Other)) GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->Fail(); }
+
+AMovingPlatform::AMovingPlatform()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Platform"));
+    RootComponent = Mesh;
+    Mesh->SetStaticMesh(CubeMesh());
+    Mesh->SetMobility(EComponentMobility::Movable);
+    Paint(Mesh, FLinearColor(1.f, .35f, .03f));
+}
+void AMovingPlatform::BeginPlay() { Super::BeginPlay(); Origin = GetActorLocation(); }
+void AMovingPlatform::Tick(float Dt) { Super::Tick(Dt); SetActorLocation(Origin + FVector(0, FMath::Sin(GetWorld()->TimeSeconds * 1.2f) * 260.f, 0)); }
+
+AStoneDoor::AStoneDoor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Door"));
+    RootComponent = Mesh;
+    Mesh->SetStaticMesh(CubeMesh());
+    Paint(Mesh, FLinearColor(.25f, .3f, .38f));
+}
+void AStoneDoor::Open() { ClosedLocation = GetActorLocation(); bOpening = true; }
+void AStoneDoor::Tick(float Dt)
+{
+    Super::Tick(Dt);
+    if (!bOpening) return;
+    const FVector Target = ClosedLocation + FVector(0, 0, 500);
+    SetActorLocation(FMath::VInterpConstantTo(GetActorLocation(), Target, Dt, 260.f));
+    if (FVector::DistSquared(GetActorLocation(), Target) < 4.f)
+    {
+        bOpening = false;
+        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+}
+
+APressurePlate::APressurePlate()
+{
+    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PressurePlate"));
+    RootComponent = Mesh;
+    Mesh->SetStaticMesh(CubeMesh());
+    Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    Mesh->SetGenerateOverlapEvents(true);
+    Paint(Mesh, FLinearColor(.1f, .45f, 1.f));
+    Mesh->OnComponentBeginOverlap.AddDynamic(this, &APressurePlate::Pressed);
+}
+void APressurePlate::Pressed(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&)
+{
+    if (Cast<ATinyCharacter>(Other)) GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->PressPlate();
+}
+
+ACheckpoint::ACheckpoint()
+{
+    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Checkpoint"));
+    RootComponent = Mesh;
+    Mesh->SetStaticMesh(CubeMesh());
+    Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    Mesh->SetGenerateOverlapEvents(true);
+    Paint(Mesh, FLinearColor(.1f, 1.f, .45f));
+    Mesh->OnComponentBeginOverlap.AddDynamic(this, &ACheckpoint::Activated);
+}
+void ACheckpoint::Activated(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&)
+{
+    if (Cast<ATinyCharacter>(Other))
+        GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->ActivateCheckpoint(GetActorLocation() + FVector(0,0,140));
+}
+
+AGoal::AGoal()
+{
+    Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Goal"));
+    RootComponent = Mesh;
+    Mesh->SetStaticMesh(CubeMesh());
+    Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    Mesh->SetGenerateOverlapEvents(true);
+    Paint(Mesh, FLinearColor(.05f, 1.f, .2f));
+    Mesh->OnComponentBeginOverlap.AddDynamic(this, &AGoal::Reached);
+}
+void AGoal::Reached(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&) { if (Cast<ATinyCharacter>(Other)) GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->TryFinish(); }
+
+void ATinyHUD::DrawHUD()
+{
+    Super::DrawHUD();
+    auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>();
+    if (!GM || !Canvas) return;
+    const FString Line = FString::Printf(TEXT("TIME %.1f   CORES %d/%d   FALLS %d   GATE %s"), GM->Time, GM->Collected, GM->Total, GM->Deaths, GM->PlateActivated ? TEXT("OPEN") : TEXT("LOCKED"));
+    DrawText(Line, FLinearColor::White, 40, 35, GEngine->GetLargeFont(), 1.1f, false);
+    DrawText(TEXT("WASD Move   Mouse Look   Space Jump   R Restart"), FLinearColor(.7f,.8f,1), 40, 75);
+    if (!GM->Message.IsEmpty()) DrawText(GM->Message, GM->Finished ? FLinearColor::Green : FLinearColor::Yellow, 40, 115, GEngine->GetLargeFont(), 1.2f, false);
+}
+
+ATinyCourseGameMode::ATinyCourseGameMode()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    DefaultPawnClass = ATinyCharacter::StaticClass();
+    HUDClass = ATinyHUD::StaticClass();
+}
+
+void ATinyCourseGameMode::BeginPlay()
+{
+    Super::BeginPlay();
+    BuildCourse();
+    SpawnPlayer();
+}
+void ATinyCourseGameMode::Tick(float Dt)
+{
+    Super::Tick(Dt);
+    if (!Finished) Time += Dt;
+    if (auto* P = UGameplayStatics::GetPlayerPawn(this, 0); P && P->GetActorLocation().Z < -500.f) Fail();
+}
+
+AActor* ATinyCourseGameMode::Block(FVector L, FVector S, FColor Color)
+{
+    AActor* A = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), L, FRotator::ZeroRotator);
+    auto* M = NewObject<UStaticMeshComponent>(A, TEXT("Block"));
+    A->SetRootComponent(M); M->RegisterComponent(); M->SetStaticMesh(CubeMesh()); M->SetWorldScale3D(S);
+    Paint(M, FLinearColor(Color));
+    return A;
+}
+
+void ATinyCourseGameMode::BuildCourse()
+{
+    // The engine Entry map contains no lights. Add a simple daylight rig so the
+    // generated character, platforms and gameplay objects are actually visible.
+    auto* Sun = GetWorld()->SpawnActor<ADirectionalLight>(
+        ADirectionalLight::StaticClass(), FVector::ZeroVector, FRotator(-50.f, -35.f, 0.f));
+    Sun->GetLightComponent()->SetIntensity(8.f);
+    Sun->GetLightComponent()->SetLightColor(FLinearColor(1.f, .92f, .8f));
+
+    auto* Sky = GetWorld()->SpawnActor<ASkyLight>(
+        ASkyLight::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
+    Sky->GetLightComponent()->SetMobility(EComponentMobility::Movable);
+    Sky->GetLightComponent()->SetIntensity(2.f);
+    Sky->GetLightComponent()->RecaptureSky();
+
+    // Keep every gameplay section readable even when it is enclosed by walls.
+    const float LightPositions[] = { -850.f, -250.f, 400.f, 1050.f, 1600.f };
+    for (const float X : LightPositions)
+    {
+        auto* Lamp = GetWorld()->SpawnActor<APointLight>(
+            APointLight::StaticClass(), FVector(X, 0, 520), FRotator::ZeroRotator);
+        auto* Light = Cast<UPointLightComponent>(Lamp->GetLightComponent());
+        Light->SetIntensity(6500.f);
+        Light->SetAttenuationRadius(1250.f);
+        Light->SetLightColor(FLinearColor(.65f, .8f, 1.f));
+        Light->SetCastShadows(false);
+    }
+
+    const FColor Floor(55, 65, 82);
+    const FColor Platform(100, 120, 150);
+    const FColor Wall(26, 34, 50);
+    Block(FVector(0,0,-70), FVector(22,8,1), Floor);
+    Block(FVector(0,-850,260), FVector(22,1,7), Wall);
+    Block(FVector(0, 850,260), FVector(22,1,7), Wall);
+    Block(FVector(-2150,0,260), FVector(1,8,7), Wall);
+    Block(FVector(400,0,70), FVector(2.2f,2,0.4f), Platform);
+    Block(FVector(760,0,150), FVector(2,2,0.4f), Platform);
+    Block(FVector(1120,0,240), FVector(2,2,0.4f), Platform);
+    Block(FVector(1500,0,330), FVector(3,2.5f,0.4f), Platform);
+    // Lab-style gateway and cover pieces similar to an editor-built course.
+    Block(FVector(-250,-330,90), FVector(.45f,1.2f,2.2f), Wall);
+    Block(FVector(-250, 330,90), FVector(.45f,1.2f,2.2f), Wall);
+    Block(FVector(-250,0,290), FVector(.45f,2.2f,.35f), Platform);
+    Block(FVector(1250,-520,40), FVector(1.4f,.5f,1.2f), Wall);
+    Block(FVector(1250, 520,40), FVector(1.4f,.5f,1.2f), Wall);
+
+    const FVector PickupLocations[] = { {-550,0,35}, {-100,250,35}, {400,0,150} };
+    for (const FVector& L : PickupLocations) Pickups.Add(GetWorld()->SpawnActor<APickup>(APickup::StaticClass(), L, FRotator::ZeroRotator));
+
+    auto* H1 = GetWorld()->SpawnActor<AHazard>(AHazard::StaticClass(), FVector(100,0,-10), FRotator::ZeroRotator); H1->SetActorScale3D(FVector(2.5f,.7f,.2f));
+    auto* H2 = GetWorld()->SpawnActor<AHazard>(AHazard::StaticClass(), FVector(850,0,20), FRotator::ZeroRotator); H2->SetActorScale3D(FVector(2,.7f,.2f));
+    auto* MP = GetWorld()->SpawnActor<AMovingPlatform>(AMovingPlatform::StaticClass(), FVector(760,0,60), FRotator::ZeroRotator); MP->SetActorScale3D(FVector(1.5f,1.5f,.25f));
+    auto* Plate = GetWorld()->SpawnActor<APressurePlate>(APressurePlate::StaticClass(), FVector(1120,0,295), FRotator::ZeroRotator); Plate->SetActorScale3D(FVector(1.1f,1.1f,.12f));
+    Door = GetWorld()->SpawnActor<AStoneDoor>(AStoneDoor::StaticClass(), FVector(1370,0,250), FRotator::ZeroRotator); Door->SetActorScale3D(FVector(.35f,3.f,3.f));
+    auto* Checkpoint = GetWorld()->SpawnActor<ACheckpoint>(ACheckpoint::StaticClass(), FVector(1450,0,410), FRotator::ZeroRotator); Checkpoint->SetActorScale3D(FVector(.5f,1.5f,.08f));
+    auto* Goal = GetWorld()->SpawnActor<AGoal>(AGoal::StaticClass(), FVector(1700,0,460), FRotator::ZeroRotator); Goal->SetActorScale3D(FVector(.25f,2.f,1.5f));
+}
+
+void ATinyCourseGameMode::SpawnPlayer()
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PC) return;
+    if (APawn* P = PC->GetPawn()) P->SetActorLocation(Start);
+    else { auto* NewPawn = GetWorld()->SpawnActor<ATinyCharacter>(ATinyCharacter::StaticClass(), Start, FRotator::ZeroRotator); PC->Possess(NewPawn); }
+}
+
+void ATinyCourseGameMode::TakePickup() { ++Collected; Message = FString::Printf(TEXT("Energy core secured: %d/%d"), Collected, Total); }
+void ATinyCourseGameMode::PressPlate()
+{
+    if (PlateActivated) return;
+    if (Collected < Total) { Message = FString::Printf(TEXT("Plate needs %d more energy cores"), Total-Collected); return; }
+    PlateActivated = true;
+    Message = TEXT("Pressure plate active - stone gate opening!");
+    if (Door) Door->Open();
+}
+void ATinyCourseGameMode::ActivateCheckpoint(const FVector& Location)
+{
+    if (!PlateActivated) return;
+    RespawnPoint = Location;
+    Message = TEXT("Checkpoint activated");
+}
+void ATinyCourseGameMode::Fail() { ++Deaths; Message = TEXT("System reset - checkpoint restored"); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
+void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("Restore all cores and open the stone gate first"); return; } Finished = true; Message = FString::Printf(TEXT("ECHO RUINS COMPLETE!  %.1f seconds  -  Press R"), Time); }
+void ATinyCourseGameMode::RestartRun() { UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()), false); }

@@ -1,0 +1,9 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.7",
+  "Category": "Games",
+  "Description": "A tiny third-person obstacle course built entirely from C++ and engine primitives.",
+  "Modules": [
+    { "Name": "TinyCourse", "Type": "Runtime", "LoadingPhase": "Default" }
+  ]
+}
