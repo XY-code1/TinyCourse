@@ -23,8 +23,10 @@ public:
     ACourseBlock();
     virtual void OnConstruction(const FTransform& Transform) override;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Course") FLinearColor BlockColor = FLinearColor(.35f, .32f, .28f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Course") FString MaterialAssetPath;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
+    void ApplyAppearance();
 protected:
     virtual void BeginPlay() override;
 };
@@ -41,6 +43,7 @@ public:
 private:
     UPROPERTY() USpringArmComponent* SpringArm;
     UPROPERTY() UCameraComponent* Camera;
+    UPROPERTY() UPointLightComponent* CharacterFillLight;
     void Forward(float Value);
     void Right(float Value);
     void JumpPressed();

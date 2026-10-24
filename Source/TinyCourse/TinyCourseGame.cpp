@@ -62,9 +62,17 @@ ACourseBlock::ACourseBlock()
 void ACourseBlock::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
+    ApplyAppearance();
+}
+void ACourseBlock::BeginPlay() { Super::BeginPlay(); ApplyAppearance(); }
+void ACourseBlock::ApplyAppearance()
+{
+    if (!MaterialAssetPath.IsEmpty())
+    {
+        if (auto* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialAssetPath)) { Mesh->SetMaterial(0, Material); return; }
+    }
     Paint(Mesh, BlockColor);
 }
-void ACourseBlock::BeginPlay() { Super::BeginPlay(); Paint(Mesh, BlockColor); }
 
 ATinyCharacter::ATinyCharacter()
 {
@@ -100,6 +108,13 @@ ATinyCharacter::ATinyCharacter()
     SpringArm->bDoCollisionTest = true;
     Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
     Camera->SetupAttachment(SpringArm);
+    CharacterFillLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("CharacterFill"));
+    CharacterFillLight->SetupAttachment(Camera);
+    CharacterFillLight->SetRelativeLocation(FVector(30.f, 0.f, 0.f));
+    CharacterFillLight->SetIntensity(320.f);
+    CharacterFillLight->SetAttenuationRadius(620.f);
+    CharacterFillLight->SetLightColor(FLinearColor(1.f, .78f, .6f));
+    CharacterFillLight->SetCastShadows(false);
 }
 
 void ATinyCharacter::SetupPlayerInputComponent(UInputComponent* Input)
@@ -170,10 +185,10 @@ AHazard::AHazard()
     Mesh->SetStaticMesh(CubeMesh());
     Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
     Mesh->SetGenerateOverlapEvents(true);
-    Paint(Mesh, FLinearColor(.9f, .03f, .02f));
+    Paint(Mesh, FLinearColor(.12f, .008f, .004f));
     Mesh->OnComponentBeginOverlap.AddDynamic(this, &AHazard::Hit);
 }
-void AHazard::BeginPlay() { Super::BeginPlay(); Paint(Mesh, FLinearColor(.9f, .03f, .02f)); }
+void AHazard::BeginPlay() { Super::BeginPlay(); Paint(Mesh, FLinearColor(.12f, .008f, .004f)); }
 void AHazard::Hit(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&) { if (Cast<ATinyCharacter>(Other)) GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->Fail(); }
 
 AMovingPlatform::AMovingPlatform()
@@ -332,7 +347,7 @@ void ATinyCourseGameMode::BeginPlay()
     }
     SpawnPlayer();
     ShowMessage(TEXT("WASD：移动  鼠标：调整视角  Space：跳跃  C/左Ctrl：下蹲"), 6.f);
-    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture"));
+    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture"));
     if (bAuditCapture) IFileManager::Get().MakeDirectory(*(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit")), true);
 }
 void ATinyCourseGameMode::Tick(float Dt)
@@ -369,6 +384,26 @@ void ATinyCourseGameMode::RunAuditStep()
     {
         FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit") / Name, false, false);
     };
+    if (FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture")))
+    {
+        switch (AuditStep++)
+        {
+        case 0: Face(-6); Shot(TEXT("20_spawn_gate.png")); break;
+        case 1: Move(FVector(-850,0,140)); Face(180); if (auto* PC=UGameplayStatics::GetPlayerController(this,0)) PC->ConsoleCommand(TEXT("fov 110")); break;
+        case 2: Shot(TEXT("21_hall_all_entries.png")); break;
+        case 3: if (auto* PC=UGameplayStatics::GetPlayerController(this,0)) PC->ConsoleCommand(TEXT("fov 90")); Move(FVector(-1500,-1180,128)); Face(-90); break;
+        case 4: Shot(TEXT("22_blue_all_platforms.png")); break;
+        case 5: Move(FVector(-1370,-2510,238)); Face(-90); break;
+        case 6: Shot(TEXT("23_manny_dark_area.png")); break;
+        case 7: Move(FVector(-1500,-1040,108)); break;
+        case 8: Move(FVector(-1500,-1650,-185)); break;
+        case 9: Move(FVector(-1580,-3020,340)); break;
+        case 10: Move(FVector(-1030,0,145)); Face(0); break;
+        case 11: bAuditCapture = false; FGenericPlatformMisc::RequestExit(false); break;
+        default: bAuditCapture = false; break;
+        }
+        return;
+    }
     if (FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")))
     {
         switch (AuditStep++)
