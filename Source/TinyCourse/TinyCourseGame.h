@@ -7,6 +7,8 @@
 #include "GameFramework/HUD.h"
 #include "TinyCourseGame.generated.h"
 
+class ATextRenderActor;
+
 class UCameraComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
@@ -96,9 +98,20 @@ public:
     AMovingPlatform();
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Movement") FVector TravelOffset = FVector(400.f, 0.f, 0.f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Movement") float MoveSpeed = 140.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Movement") float EndPause = .75f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Visual") FString MaterialAssetPath;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
+    UPROPERTY() UStaticMeshComponent* EdgeN;
+    UPROPERTY() UStaticMeshComponent* EdgeS;
+    UPROPERTY() UStaticMeshComponent* EdgeE;
+    UPROPERTY() UStaticMeshComponent* EdgeW;
     FVector Origin;
+    float Distance = 0.f;
+    float HoldRemaining = 0.f;
+    int32 Direction = 1;
 };
 
 UCLASS()
@@ -216,7 +229,13 @@ private:
     int32 AuditStep = 0;
     float MessageUntil = 0.f;
     bool bNearBlueEntrance = false;
+    bool bNearYellowEntrance = false;
+    bool bNearMovingPlatform = false;
+    bool bNearCrouchTunnel = false;
     bool bNearLockedEntrance = false;
+    UPROPERTY() AActor* YellowGate = nullptr;
+    UPROPERTY() ATextRenderActor* YellowSign = nullptr;
+    void UnlockYellowTrial();
     void BuildCourse();
     void SpawnPlayer();
     void RunAuditStep();

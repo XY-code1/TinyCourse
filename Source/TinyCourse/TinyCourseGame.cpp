@@ -13,6 +13,7 @@
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyLight.h"
 #include "Engine/PointLight.h"
+#include "Engine/TextRenderActor.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/PointLightComponent.h"
@@ -111,7 +112,7 @@ ATinyCharacter::ATinyCharacter()
     CharacterFillLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("CharacterFill"));
     CharacterFillLight->SetupAttachment(Camera);
     CharacterFillLight->SetRelativeLocation(FVector(30.f, 0.f, 0.f));
-    CharacterFillLight->SetIntensity(320.f);
+    CharacterFillLight->SetIntensity(15.f);
     CharacterFillLight->SetAttenuationRadius(620.f);
     CharacterFillLight->SetLightColor(FLinearColor(1.f, .78f, .6f));
     CharacterFillLight->SetCastShadows(false);
@@ -163,7 +164,7 @@ APickup::APickup()
     Paint(Mesh, FLinearColor(0.f, .8f, 1.f));
     Mesh->OnComponentBeginOverlap.AddDynamic(this, &APickup::Collected);
 }
-void APickup::BeginPlay() { Super::BeginPlay(); Paint(Mesh, FLinearColor(0.f, .8f, 1.f)); }
+void APickup::BeginPlay() { Super::BeginPlay(); Paint(Mesh, ActorHasTag(TEXT("YellowCore")) ? FLinearColor(1.f,.55f,.03f) : FLinearColor(0.f,.8f,1.f)); }
 void APickup::Tick(float Dt) { Super::Tick(Dt); AddActorLocalRotation(FRotator(0, 100.f * Dt, 0)); }
 void APickup::Collected(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&)
 {
@@ -171,7 +172,7 @@ void APickup::Collected(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent
     auto* Flash = GetWorld()->SpawnActor<APointLight>(APointLight::StaticClass(), GetActorLocation(), FRotator::ZeroRotator);
     auto* FlashLight = CastChecked<UPointLightComponent>(Flash->GetLightComponent());
     FlashLight->SetIntensity(9000.f);
-    FlashLight->SetLightColor(FLinearColor(.05f,.55f,1.f));
+    FlashLight->SetLightColor(ActorHasTag(TEXT("YellowCore")) ? FLinearColor(1.f,.45f,.02f) : FLinearColor(.05f,.55f,1.f));
     FlashLight->SetAttenuationRadius(450.f);
     Flash->SetLifeSpan(.45f);
     GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->TakePickup();
@@ -198,10 +199,44 @@ AMovingPlatform::AMovingPlatform()
     RootComponent = Mesh;
     Mesh->SetStaticMesh(CubeMesh());
     Mesh->SetMobility(EComponentMobility::Movable);
-    Paint(Mesh, FLinearColor(1.f, .35f, .03f));
+    Mesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    auto MakeEdge = [this](const TCHAR* Name, const FVector& Location, const FVector& Scale)
+    {
+        auto* Edge = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+        Edge->SetupAttachment(Mesh); Edge->SetStaticMesh(CubeMesh()); Edge->SetRelativeLocation(Location);
+        Edge->SetRelativeScale3D(Scale); Edge->SetCollisionEnabled(ECollisionEnabled::NoCollision); return Edge;
+    };
+    EdgeN = MakeEdge(TEXT("YellowEdgeN"), FVector(0,-48,55), FVector(.92f,.035f,.12f));
+    EdgeS = MakeEdge(TEXT("YellowEdgeS"), FVector(0,48,55), FVector(.92f,.035f,.12f));
+    EdgeE = MakeEdge(TEXT("YellowEdgeE"), FVector(48,0,55), FVector(.035f,.92f,.12f));
+    EdgeW = MakeEdge(TEXT("YellowEdgeW"), FVector(-48,0,55), FVector(.035f,.92f,.12f));
+    Paint(Mesh, FLinearColor(.65f, .36f, .04f));
 }
-void AMovingPlatform::BeginPlay() { Super::BeginPlay(); Origin = GetActorLocation(); Paint(Mesh, FLinearColor(1.f, .55f, .03f)); }
-void AMovingPlatform::Tick(float Dt) { Super::Tick(Dt); SetActorLocation(Origin + FVector(0, FMath::Sin(GetWorld()->TimeSeconds * 1.2f) * 260.f, 0)); }
+void AMovingPlatform::BeginPlay()
+{
+    Super::BeginPlay(); Origin = GetActorLocation();
+    if (!MaterialAssetPath.IsEmpty())
+    {
+        if (auto* M = LoadObject<UMaterialInterface>(nullptr, *MaterialAssetPath)) Mesh->SetMaterial(0, M);
+    }
+    else Paint(Mesh, FLinearColor(.65f, .36f, .04f));
+    Paint(EdgeN, FLinearColor(.75f,.42f,.025f)); Paint(EdgeS, FLinearColor(.75f,.42f,.025f));
+    Paint(EdgeE, FLinearColor(.75f,.42f,.025f)); Paint(EdgeW, FLinearColor(.75f,.42f,.025f));
+}
+void AMovingPlatform::Tick(float Dt)
+{
+    Super::Tick(Dt);
+    if (HoldRemaining > 0.f) { HoldRemaining -= Dt; return; }
+    const float Length = TravelOffset.Size();
+    if (Length < 1.f) return;
+    Distance = FMath::Clamp(Distance + Direction * MoveSpeed * Dt, 0.f, Length);
+    const float Alpha = FMath::SmoothStep(0.f, 1.f, Distance / Length);
+    SetActorLocation(Origin + TravelOffset * Alpha, true);
+    if ((Direction > 0 && Distance >= Length) || (Direction < 0 && Distance <= 0.f))
+    {
+        Direction *= -1; HoldRemaining = EndPause;
+    }
+}
 
 AStoneDoor::AStoneDoor()
 {
@@ -344,10 +379,18 @@ void ATinyCourseGameMode::BeginPlay()
     {
         for (TActorIterator<AStoneDoor> It(GetWorld()); It; ++It) { Door = *It; break; }
         for (TActorIterator<APressurePlate> It(GetWorld()); It; ++It) { Plate = *It; break; }
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->ActorHasTag(TEXT("YellowGate"))) YellowGate = *It;
+        }
+        for (TActorIterator<ATextRenderActor> It(GetWorld()); It; ++It)
+        {
+            if (It->ActorHasTag(TEXT("YellowSign"))) YellowSign = *It;
+        }
     }
     SpawnPlayer();
     ShowMessage(TEXT("WASD：移动  鼠标：调整视角  Space：跳跃  C/左Ctrl：下蹲"), 6.f);
-    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture"));
+    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("YellowSliceCapture"));
     if (bAuditCapture) IFileManager::Get().MakeDirectory(*(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit")), true);
 }
 void ATinyCourseGameMode::Tick(float Dt)
@@ -360,11 +403,20 @@ void ATinyCourseGameMode::Tick(float Dt)
     {
         const FVector L = P->GetActorLocation();
         const bool NearBlue = FVector::Dist2D(L, FVector(-1500,-760,0)) < 500.f;
-        const bool NearLocked = FVector::Dist2D(L, FVector(-950,760,0)) < 560.f;
+        const bool NearYellow = FVector::Dist2D(L, FVector(-1300,760,0)) < 520.f;
+        const bool NearMoving = FVector::Dist2D(L, FVector(-1300,1450,0)) < 480.f;
+        const bool NearCrouch = FVector::Dist2D(L, FVector(-1300,2450,0)) < 390.f;
+        const bool NearLocked = FVector::Dist2D(L, FVector(-650,760,0)) < 420.f;
         if (NearBlue && !bNearBlueEntrance && Collected == 0) { Objective = TEXT("蓝色试炼：掌握跳跃"); }
         else if (!NearBlue && bNearBlueEntrance && Collected == 0) { Objective = TEXT("前往蓝色试炼，收集能量核心"); }
         if (NearLocked && !bNearLockedEntrance) ShowMessage(TEXT("尚未开放"), 1.5f);
+        if (NearYellow && !bNearYellowEntrance && Collected >= 1) Objective = TEXT("黄色试炼：观察平台的移动节奏");
+        if (NearMoving && !bNearMovingPlatform) ShowMessage(TEXT("等待合适时机，再踏上平台"), 3.f);
+        if (NearCrouch && !bNearCrouchTunnel) ShowMessage(TEXT("按住 C 或左 Ctrl 蹲伏通过"), 4.f);
         bNearBlueEntrance = NearBlue;
+        bNearYellowEntrance = NearYellow;
+        bNearMovingPlatform = NearMoving;
+        bNearCrouchTunnel = NearCrouch;
         bNearLockedEntrance = NearLocked;
     }
     if (bAuditCapture)
@@ -384,6 +436,43 @@ void ATinyCourseGameMode::RunAuditStep()
     {
         FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit") / Name, false, false);
     };
+    if (FParse::Param(FCommandLine::Get(), TEXT("YellowSliceCapture")))
+    {
+        switch (AuditStep++)
+        {
+        case 0: Move(FVector(-1580,-3020,340)); break; // collect blue
+        case 1: Move(FVector(-1300,620,140)); Face(90); break;
+        case 2: Shot(TEXT("30_yellow_entrance_unlocked.png")); break;
+        case 3: Move(FVector(-1300,1080,160)); break; // entrance checkpoint
+        case 4:
+            for (TActorIterator<AMovingPlatform> It(GetWorld()); It; ++It) if (It->GetActorLocation().Y < 1800.f) { Move(It->GetActorLocation()+FVector(0,0,108)); break; }
+            Face(90); break;
+        case 5: Shot(TEXT("31_riding_moving_platform.png")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT MovingPlatformRideObserved")); break;
+        case 6:
+        {
+            Move(FVector(-1300,2160,213)); Face(90); if (auto* C=Cast<ACharacter>(P)) C->UnCrouch();
+            const float StartY=P->GetActorLocation().Y; FHitResult Hit; P->AddActorWorldOffset(FVector(0,360,0),true,&Hit);
+            UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CrouchTunnelStandingBlocked moved=%.1f blocked=%d"),P->GetActorLocation().Y-StartY,Hit.bBlockingHit); break;
+        }
+        case 7: if (auto* C=Cast<ACharacter>(P)) C->Crouch(); Move(FVector(-1300,2160,165)); break;
+        case 8: Shot(TEXT("32_crouch_tunnel.png")); break;
+        case 9: Move(FVector(-1300,2440,95)); break;
+        case 10:
+        {
+            const float StartY=P->GetActorLocation().Y; FHitResult Hit; P->AddActorWorldOffset(FVector(0,520,0),true,&Hit);
+            UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CrouchTunnelPassed moved=%.1f crouched=%d"),P->GetActorLocation().Y-StartY,Cast<ACharacter>(P)&&Cast<ACharacter>(P)->bIsCrouched); break;
+        }
+        case 11: if (auto* C=Cast<ACharacter>(P)) C->UnCrouch(); Move(FVector(-1300,2840,230)); break;
+        case 12: Move(FVector(-1300,3200,-210)); break; // fail from mid checkpoint
+        case 13: Move(FVector(-1300,3590,480)); break; // yellow core
+        case 14: Shot(TEXT("33_yellow_core_2of3.png")); break;
+        case 15: Move(FVector(-1580,-3020,340)); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT DuplicateCoreRevisit count=%d"), Collected); break;
+        case 16: Move(FVector(-1030,0,145)); break;
+        case 17: bAuditCapture=false; FGenericPlatformMisc::RequestExit(false); break;
+        default: bAuditCapture=false; break;
+        }
+        return;
+    }
     if (FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture")))
     {
         switch (AuditStep++)
@@ -523,12 +612,36 @@ void ATinyCourseGameMode::SpawnPlayer()
 }
 
 void ATinyCourseGameMode::ShowMessage(const FString& Text, float Seconds) { Message = Text; MessageUntil = GetWorld()->TimeSeconds + Seconds; }
+void ATinyCourseGameMode::UnlockYellowTrial()
+{
+    if (YellowGate)
+    {
+        YellowGate->SetActorHiddenInGame(true); YellowGate->SetActorEnableCollision(false);
+    }
+    if (YellowSign && YellowSign->GetTextRender())
+    {
+        YellowSign->GetTextRender()->SetText(FText::FromString(TEXT("黄色试炼：观察平台的移动节奏")));
+        YellowSign->GetTextRender()->SetTextRenderColor(FColor(255,205,70));
+    }
+    ShowMessage(TEXT("黄色试炼已开启"), 4.f);
+    Objective = TEXT("前往黄色试炼，观察平台的移动节奏");
+    UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT YellowTrialUnlocked"));
+}
 void ATinyCourseGameMode::TakePickup()
 {
     if (Collected >= Total) return;
     ++Collected;
-    ShowMessage(FString::Printf(TEXT("获得能量核心  %d/%d"), Collected, Total), 4.f);
-    Objective = Collected == Total ? TEXT("核心已集齐，返回中央大厅") : TEXT("返回中央大厅");
+    if (Collected == 1) UnlockYellowTrial();
+    else if (Collected == 2)
+    {
+        ShowMessage(TEXT("已获得黄色核心，返回中央大厅"), 4.f);
+        Objective = TEXT("已获得黄色核心，返回中央大厅");
+    }
+    else
+    {
+        ShowMessage(FString::Printf(TEXT("获得能量核心  %d/%d"), Collected, Total), 4.f);
+        Objective = TEXT("核心已集齐，返回中央大厅");
+    }
     UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CoreCollected %d/%d"), Collected, Total);
 }
 void ATinyCourseGameMode::PressPlate()

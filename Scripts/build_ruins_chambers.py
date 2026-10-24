@@ -28,7 +28,7 @@ material_instance('MI_AncientDoubleDoor_Bright', .62, (.42, .32, .24), 1.08, .80
 if unreal.EditorAssetLibrary.does_asset_exist(MAP): unreal.EditorAssetLibrary.delete_asset(MAP)
 unreal.EditorLevelLibrary.new_level(MAP)
 load = lambda n: unreal.load_class(None, '/Script/TinyCourse.' + n)
-C = {n: load(n) for n in ['CourseBlock', 'Pickup', 'Hazard', 'PressurePlate', 'StoneDoor', 'Checkpoint']}
+C = {n: load(n) for n in ['CourseBlock', 'Pickup', 'Hazard', 'PressurePlate', 'StoneDoor', 'Checkpoint', 'MovingPlatform']}
 spawn, V = unreal.EditorLevelLibrary.spawn_actor_from_class, unreal.Vector
 COL = {'blue': unreal.LinearColor(.025,.16,.52,1), 'yellow': unreal.LinearColor(.42,.24,.025,1),
        'red': unreal.LinearColor(.26,.018,.01,1), 'green': unreal.LinearColor(.025,.32,.09,1)}
@@ -43,6 +43,11 @@ def block(name, loc, size, look='stone', rot=(0,0,0), collision=True):
 
 def actor(kind, name, loc, size=(100,100,100)):
     a = spawn(C[kind], V(*loc)); a.set_actor_label(name); a.set_actor_scale3d(V(size[0]/100,size[1]/100,size[2]/100)); return a
+
+def moving(name, loc, size, travel, speed=140, pause=.75):
+    a=actor('MovingPlatform',name,loc,size)
+    a.set_editor_property('travel_offset',V(*travel)); a.set_editor_property('move_speed',speed)
+    a.set_editor_property('end_pause',pause); a.set_editor_property('material_asset_path',MAT_STONE); return a
 
 def prop(name, shape, loc, size, material=MAT_STONE, rot=(0,0,0)):
     a = spawn(unreal.StaticMeshActor, V(*loc), unreal.Rotator(*rot)); a.set_actor_label(name)
@@ -72,8 +77,8 @@ ps=spawn(unreal.PlayerStart,V(-1800,250,110)); ps.set_actor_label('Spawn_PlayerS
 # Central hall shell: warm stone, framed gate, six columns, steps, inlay and rubble.
 block('HallFloor',(-1550,0,-30),(2400,1800,60)); block('HallCeiling',(-1550,0,650),(2400,1800,55),'dark')
 block('HallNorthA',(-2350,-900,300),(800,70,600),'dark'); block('HallNorthB',(-650,-900,300),(800,70,600),'dark')
-block('HallSouthA',(-2350,900,300),(800,70,600),'dark'); block('HallSouthMid',(-1500,900,300),(500,70,600),'dark')
-block('HallSouthGateDivider',(-925,900,300),(180,70,600),'dark'); block('HallSouthEdge',(-350,900,300),(500,70,600),'dark')
+block('HallSouthA',(-2175,900,300),(1150,70,600),'dark')
+block('HallSouthGateDivider',(-975,900,300),(190,70,600),'dark'); block('HallSouthEdge',(-385,900,300),(70,70,600),'dark')
 block('GateWallN',(-350,-600,300),(90,600,600),'dark'); block('GateWallS',(-350,600,300),(90,600,600),'dark')
 block('GateLintel',(-350,0,555),(100,650,150)); block('GateFrameN',(-400,-380,265),(150,110,530)); block('GateFrameS',(-400,380,265),(150,110,530))
 for i,(x,y) in enumerate([(-2250,-690),(-2250,690),(-1550,-690),(-1550,690),(-850,-690),(-850,690)]):
@@ -91,8 +96,11 @@ edge('BlueTrim',(-1500,-835,430),(420,12,18),'blue')
 sign('BlueTrialSign','蓝色跳跃试炼',(-1630,-824,470),90,unreal.Color(100,170,255,255))
 for name,x,color in [('Yellow',-1300,'yellow'),('Red',-650,'red')]:
     block(name+'FrameL',(x-230,900,250),(90,100,500)); block(name+'FrameR',(x+230,900,250),(90,100,500)); block(name+'FrameTop',(x,900,520),(550,100,100))
-    block(name+'SealedDoor',(x,855,230),(370,70,460),'dark'); edge(name+'Trim',(x,810,430),(310,12,18),color)
-    sign(name+'TrialSign',('黄色 尚未开放' if name=='Yellow' else '红色 尚未开放'),(x-150,800,470),-90,unreal.Color(220,200,155,255))
+    sealed=block(name+'SealedDoor',(x,855,230),(370,70,460),'dark'); edge(name+'Trim',(x,810,430),(310,12,18),color)
+    label=sign(name+'TrialSign',('黄色 尚未开放' if name=='Yellow' else '红色 尚未开放'),(x-150,800,470),-90,unreal.Color(220,200,155,255))
+    if name=='Yellow':
+        sealed.set_editor_property('tags',[unreal.Name('YellowGate')]); label.set_editor_property('tags',[unreal.Name('YellowSign')])
+    else: sealed.set_editor_property('tags',[unreal.Name('RedGate')])
 
 plate=actor('PressurePlate','CentralPressurePlate',(-1030,0,30),(175,175,12))
 actor('StoneDoor','FinalStoneDoor',(-310,0,215),(120,120,120))
@@ -116,13 +124,62 @@ actor('Pickup','Core_Blue',(xs[-1],y,zs[-1]+145),(42,42,42))
 block('BlueReturnLedge',(-910,-2350,210),(180,1900,65),'stone'); edge('ReturnEdge',(-995,-2350,246),(12,1850,10),'green')
 block('BlueReturnLanding',(-1120,-1170,75),(420,320,80),'stone')
 
+# Yellow trial: timing, moving-platform riding and a mandatory crouch tunnel.
+# The room is narrow and readable; yellow is limited to trims and machinery edges.
+block('YellowRoomFloor',(-1300,2450,-235),(1700,3100,50),'dark')
+block('YellowWestWall',(-2150,2450,285),(60,3100,1040),'dark')
+block('YellowEastWall',(-450,2450,285),(60,3100,1040),'dark')
+block('YellowEndWall',(-1300,4000,285),(1700,60,1040),'dark')
+block('YellowCeiling',(-1300,2450,780),(1700,3100,50),'dark')
+block('YellowEntrySafe',(-1300,1120,20),(520,400,80),'stone')
+edge('YellowEntryLine',(-1300,940,65),(380,14,12),'yellow')
+actor('Checkpoint','Checkpoint_YellowEntrance',(-1300,1080,72),(150,100,10))
+
+# A dark reset floor covers every gap without becoming a dominant red surface.
+actor('Hazard','YellowFallReset',(-1300,2480,-185),(1600,2920,35))
+
+# First timing section: lateral platform and offset landing.
+moving('YellowMover_Horizontal1',(-1570,1570,80),(300,300,32),(540,0,0),145,.7)
+block('YellowLanding1',(-760,1780,90),(330,360,70),'stone')
+edge('YellowLanding1Trim',(-760,1610,128),(300,10,9),'yellow')
+moving('YellowMover_Horizontal2',(-800,2100,125),(280,280,32),(-500,0,0),130,.6)
+block('YellowTunnelApproach',(-1300,2260,85),(420,300,80),'stone')
+
+# 135 cm clearance: the 176 cm standing capsule is blocked, crouched capsule passes.
+block('CrouchTunnelFloor',(-1300,2520,20),(430,560,70),'stone')
+block('CrouchTunnelRoof',(-1300,2520,205),(430,560,100),'dark')
+block('CrouchTunnelLeft',(-1510,2520,105),(25,560,270),'dark')
+block('CrouchTunnelRight',(-1090,2520,105),(25,560,270),'dark')
+sign('CrouchInstruction','按住 C 或左 Ctrl 蹲伏通过',(-1490,2240,255),90,unreal.Color(255,210,80,255))
+block('YellowMidSafe',(-1300,2860,15),(520,360,80),'stone')
+actor('Checkpoint','Checkpoint_YellowMid',(-1300,2840,58),(150,100,10))
+
+# Vertical lift rises 250 cm to the core landing.
+moving('YellowLift_Vertical',(-1300,3190,55),(300,300,34),(0,0,250),135,.8)
+block('YellowCoreLanding',(-1300,3590,330),(520,480,80),'stone')
+edge('YellowCoreLandingTrim',(-1300,3370,373),(430,12,10),'yellow')
+yellow_core=actor('Pickup','Core_Yellow',(-1300,3590,475),(42,42,42)); yellow_core.set_editor_property('tags',[unreal.Name('YellowCore')])
+sign('YellowReturnSign','黄色核心 / 返回中央大厅',(-1520,3860,470),-90,unreal.Color(255,210,80,255))
+
+# Safe return balcony along the east wall; it reconnects to the hall without teleporting.
+block('YellowReturnTop',(-720,3590,330),(620,300,70),'stone')
+block('YellowReturnWalk',(-570,2420,220),(240,2050,65),'stone')
+block('YellowReturnRamp',(-760,1330,110),(620,700,70),'stone',(0,-12,0))
+for yy in (1450,2050,2650,3250): edge('YellowGuide_%d'%yy,(-560,yy,255),(12,150,10),'yellow')
+
+lamp('YellowEntryFill',(-1300,1200,360),unreal.Color(230,185,105),280,800)
+lamp('YellowTimingFill',(-1300,1900,420),unreal.Color(225,180,100),320,950)
+lamp('YellowTunnelFill',(-1300,2520,115),unreal.Color(205,165,95),180,520)
+lamp('YellowLiftFill',(-1300,3300,480),unreal.Color(235,190,105),330,950)
+lamp('YellowCoreGuide',(-1300,3590,560),unreal.Color(255,175,45),360,600)
+
 # Fixed, deliberately modest illumination. No white emissive architecture.
 sun=spawn(unreal.DirectionalLight,V(0,0,900)); sun.set_actor_label('Sun'); sun.set_actor_rotation(unreal.Rotator(-50,-25,0),False)
 sun.get_component_by_class(unreal.DirectionalLightComponent).set_editor_property('intensity',.55)
 sky=spawn(unreal.SkyLight,V(0,0,700)); sky.set_actor_label('Sky_Ambient'); sky.get_component_by_class(unreal.SkyLightComponent).set_editor_property('intensity',.55)
 lamp('EntryFill',(-2600,0,350),unreal.Color(190,205,220),180,850)
 lamp('HallAmbient',(-1500,0,470),unreal.Color(205,215,225),240,1400)
-lamp('GateWarmKey',(-680,0,330),unreal.Color(255,190,125),320,720)
+lamp('GateWarmKey',(-680,0,330),unreal.Color(255,190,125),450,820)
 lamp('MannyHallFill',(-2050,180,230),unreal.Color(255,215,175),150,700)
 lamp('BlueEntryFill',(-1500,-1250,330),unreal.Color(120,160,230),190,800)
 lamp('BlueMidFill',(-1500,-2200,390),unreal.Color(120,150,205),210,1050)
