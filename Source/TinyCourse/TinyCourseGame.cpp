@@ -17,6 +17,7 @@
 #include "Components/SkyLightComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
@@ -27,6 +28,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformMisc.h"
 #include "UnrealClient.h"
 
 static UStaticMesh* CubeMesh()
@@ -128,8 +130,8 @@ void ATinyCharacter::Tick(float Dt)
     if (JumpBufferRemaining > 0.f && CoyoteRemaining > 0.f) { Jump(); JumpBufferRemaining = 0.f; CoyoteRemaining = 0.f; bJumped = true; }
     if (auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>())
     {
-        if (bMoved && !GM->bMovementTutorialDone) { GM->bMovementTutorialDone = true; GM->Objective = TEXT("SPACE  Jump"); }
-        if (bJumped && !GM->bJumpTutorialDone) { GM->bJumpTutorialDone = true; GM->Objective = TEXT("Complete three trials and collect energy cores"); }
+        if (bMoved && !GM->bMovementTutorialDone) { GM->bMovementTutorialDone = true; GM->ShowMessage(TEXT("空格键：跳跃    C/左Ctrl：下蹲"), 4.f); }
+        if (bJumped && !GM->bJumpTutorialDone) { GM->bJumpTutorialDone = true; GM->Objective = TEXT("前往蓝色试炼，收集能量核心"); }
     }
 }
 void ATinyCharacter::RestartRun() { if (auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()) GM->RestartRun(); }
@@ -148,7 +150,18 @@ APickup::APickup()
 }
 void APickup::BeginPlay() { Super::BeginPlay(); Paint(Mesh, FLinearColor(0.f, .8f, 1.f)); }
 void APickup::Tick(float Dt) { Super::Tick(Dt); AddActorLocalRotation(FRotator(0, 100.f * Dt, 0)); }
-void APickup::Collected(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&) { if (Cast<ATinyCharacter>(Other)) { GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->TakePickup(); Destroy(); } }
+void APickup::Collected(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&)
+{
+    if (!Cast<ATinyCharacter>(Other)) return;
+    auto* Flash = GetWorld()->SpawnActor<APointLight>(APointLight::StaticClass(), GetActorLocation(), FRotator::ZeroRotator);
+    auto* FlashLight = CastChecked<UPointLightComponent>(Flash->GetLightComponent());
+    FlashLight->SetIntensity(9000.f);
+    FlashLight->SetLightColor(FLinearColor(.05f,.55f,1.f));
+    FlashLight->SetAttenuationRadius(450.f);
+    Flash->SetLifeSpan(.45f);
+    GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->TakePickup();
+    Destroy();
+}
 
 AHazard::AHazard()
 {
@@ -272,8 +285,11 @@ ACheckpoint::ACheckpoint()
 void ACheckpoint::BeginPlay() { Super::BeginPlay(); Paint(Mesh, FLinearColor(.05f, .8f, .25f)); }
 void ACheckpoint::Activated(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&)
 {
-    if (Cast<ATinyCharacter>(Other))
+    if (!bActivated && Cast<ATinyCharacter>(Other))
+    {
+        bActivated = true;
         GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->ActivateCheckpoint(GetActorLocation() + FVector(0,0,140));
+    }
 }
 
 AGoal::AGoal()
@@ -294,8 +310,8 @@ void ATinyHUD::DrawHUD()
     Super::DrawHUD();
     auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>();
     if (!GM || !Canvas) return;
-    DrawText(FString::Printf(TEXT("CORE %d/%d"), GM->Collected, GM->Total), FLinearColor::White, 45, 35, GEngine->GetLargeFont(), 1.1f, false);
-    if (!GM->Objective.IsEmpty()) DrawText(GM->Objective, FLinearColor(.75f,.88f,1), 45, 82, GEngine->GetLargeFont(), 1.f, false);
+    DrawText(FString::Printf(TEXT("能量核心 %d/%d"), GM->Collected, GM->Total), FLinearColor::White, 45, 35, GEngine->GetLargeFont(), 1.1f, false);
+    if (!GM->Objective.IsEmpty()) DrawText(TEXT("当前目标：") + GM->Objective, FLinearColor(.75f,.88f,1), 45, 82, GEngine->GetLargeFont(), 1.f, false);
     if (!GM->Message.IsEmpty()) DrawText(GM->Message, GM->Finished ? FLinearColor::Green : FLinearColor::Yellow, 45, 128, GEngine->GetLargeFont(), 1.f, false);
 }
 
@@ -315,7 +331,8 @@ void ATinyCourseGameMode::BeginPlay()
         for (TActorIterator<APressurePlate> It(GetWorld()); It; ++It) { Plate = *It; break; }
     }
     SpawnPlayer();
-    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture"));
+    ShowMessage(TEXT("WASD：移动  鼠标：调整视角  Space：跳跃  C/左Ctrl：下蹲"), 6.f);
+    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture"));
     if (bAuditCapture) IFileManager::Get().MakeDirectory(*(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit")), true);
 }
 void ATinyCourseGameMode::Tick(float Dt)
@@ -323,6 +340,18 @@ void ATinyCourseGameMode::Tick(float Dt)
     Super::Tick(Dt);
     if (!Finished) Time += Dt;
     if (auto* P = UGameplayStatics::GetPlayerPawn(this, 0); P && P->GetActorLocation().Z < -500.f) Fail();
+    if (MessageUntil > 0.f && GetWorld()->TimeSeconds >= MessageUntil) { Message.Empty(); MessageUntil = 0.f; }
+    if (auto* P = UGameplayStatics::GetPlayerPawn(this, 0); P && GetWorld()->GetMapName().Contains(TEXT("L_RuinsChambers")))
+    {
+        const FVector L = P->GetActorLocation();
+        const bool NearBlue = FVector::Dist2D(L, FVector(-1500,-760,0)) < 500.f;
+        const bool NearLocked = FVector::Dist2D(L, FVector(-950,760,0)) < 560.f;
+        if (NearBlue && !bNearBlueEntrance && Collected == 0) { Objective = TEXT("蓝色试炼：掌握跳跃"); }
+        else if (!NearBlue && bNearBlueEntrance && Collected == 0) { Objective = TEXT("前往蓝色试炼，收集能量核心"); }
+        if (NearLocked && !bNearLockedEntrance) ShowMessage(TEXT("尚未开放"), 1.5f);
+        bNearBlueEntrance = NearBlue;
+        bNearLockedEntrance = NearLocked;
+    }
     if (bAuditCapture)
     {
         AuditElapsed += Dt;
@@ -335,10 +364,29 @@ void ATinyCourseGameMode::RunAuditStep()
     auto* P = UGameplayStatics::GetPlayerPawn(this, 0);
     if (!P) return;
     auto Move = [P](const FVector& L) { P->SetActorLocation(L, false, nullptr, ETeleportType::TeleportPhysics); };
+    auto Face = [this](float Yaw) { if (auto* PC = UGameplayStatics::GetPlayerController(this, 0)) PC->SetControlRotation(FRotator(-12.f, Yaw, 0)); };
     auto Shot = [](const TCHAR* Name)
     {
         FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit") / Name, false, false);
     };
+    if (FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")))
+    {
+        switch (AuditStep++)
+        {
+        case 0: Move(FVector(-2050,0,140)); Face(0); break;
+        case 1: Shot(TEXT("10_hall_gate.png")); break;
+        case 2: Move(FVector(-1500,-1030,108)); Face(-90); break;
+        case 3: Shot(TEXT("11_blue_trial.png")); break;
+        case 4: Move(FVector(-1500,-1650,-185)); break;
+        case 5: Move(FVector(-1580,-3015,340)); break;
+        case 6: Shot(TEXT("12_core_collected.png")); break;
+        case 7: Move(FVector(-820,0,145)); Face(0); break;
+        case 8: Shot(TEXT("13_plate_denied.png")); break;
+        case 9: bAuditCapture = false; FGenericPlatformMisc::RequestExit(false); break;
+        default: bAuditCapture = false; break;
+        }
+        return;
+    }
     switch (AuditStep++)
     {
     case 0: Shot(TEXT("01_spawn.png")); break;
@@ -439,22 +487,42 @@ void ATinyCourseGameMode::SpawnPlayer()
     else { auto* NewPawn = GetWorld()->SpawnActor<ATinyCharacter>(ATinyCharacter::StaticClass(), Start, FRotator::ZeroRotator); PC->Possess(NewPawn); }
 }
 
-void ATinyCourseGameMode::TakePickup() { ++Collected; Message = FString::Printf(TEXT("Energy Core %d/%d"), Collected, Total); Objective = Collected == Total ? TEXT("All cores collected - return to the central hall") : TEXT("Complete three trials and collect energy cores"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CoreCollected %d/%d"), Collected, Total); }
+void ATinyCourseGameMode::ShowMessage(const FString& Text, float Seconds) { Message = Text; MessageUntil = GetWorld()->TimeSeconds + Seconds; }
+void ATinyCourseGameMode::TakePickup()
+{
+    if (Collected >= Total) return;
+    ++Collected;
+    ShowMessage(FString::Printf(TEXT("获得能量核心  %d/%d"), Collected, Total), 4.f);
+    Objective = Collected == Total ? TEXT("核心已集齐，返回中央大厅") : TEXT("返回中央大厅");
+    UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CoreCollected %d/%d"), Collected, Total);
+}
 void ATinyCourseGameMode::PressPlate()
 {
     if (PlateActivated) return;
-    if (Collected < Total) { Message = FString::Printf(TEXT("Plate needs %d more energy cores"), Total-Collected); return; }
+    if (Collected < Total)
+    {
+        ShowMessage(FString::Printf(TEXT("还需要%d枚能量核心"), Total-Collected), 3.f);
+        if (Plate)
+        {
+            auto* Flash = GetWorld()->SpawnActor<APointLight>(APointLight::StaticClass(), Plate->GetActorLocation()+FVector(0,0,80), FRotator::ZeroRotator);
+            auto* FlashLight = CastChecked<UPointLightComponent>(Flash->GetLightComponent());
+            FlashLight->SetIntensity(6500.f); FlashLight->SetLightColor(FLinearColor(1.f,.08f,.02f));
+            FlashLight->SetAttenuationRadius(300.f); Flash->SetLifeSpan(.35f);
+        }
+        UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT PlateDenied missing=%d"), Total-Collected);
+        return;
+    }
     PlateActivated = true;
-    Message = TEXT("Pressure plate activated"); Objective = TEXT("Enter the portal to complete the trial"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT PlateActivated DoorOpening"));
+    ShowMessage(TEXT("压力板已激活")); Objective = TEXT("进入传送门完成试炼"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT PlateActivated DoorOpening"));
     if (Plate) Plate->SetActivated();
     if (Door) Door->Open();
 }
 void ATinyCourseGameMode::ActivateCheckpoint(const FVector& Location)
 {
     RespawnPoint = Location;
-    Message = TEXT("Checkpoint activated"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CheckpointActivated %s"), *Location.ToCompactString());
+    ShowMessage(TEXT("检查点已激活")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CheckpointActivated %s"), *Location.ToCompactString());
 }
-void ATinyCourseGameMode::Fail() { ++Deaths; Message = TEXT("Trial failed - respawned at checkpoint"); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT FailRespawn deaths=%d point=%s"), Deaths, *RespawnPoint.ToCompactString()); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
+void ATinyCourseGameMode::Fail() { ++Deaths; ShowMessage(TEXT("挑战失败，已返回检查点")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT FailRespawn deaths=%d point=%s"), Deaths, *RespawnPoint.ToCompactString()); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
 void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("Collect all cores and activate the pressure plate"); return; } Finished = true; Objective = TEXT("Trial complete"); Message = FString::Printf(TEXT("RUINS TRIAL COMPLETE  %.1f seconds  Press R to restart"), Time); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT GoalComplete time=%.1f deaths=%d"), Time, Deaths); }
 void ATinyCourseGameMode::RestartRun() { UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()), false); }
 

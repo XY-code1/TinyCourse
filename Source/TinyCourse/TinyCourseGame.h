@@ -147,6 +147,7 @@ protected:
     virtual void BeginPlay() override;
 private:
     UPROPERTY() UStaticMeshComponent* Mesh;
+    bool bActivated = false;
     UFUNCTION() void Activated(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
         UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep,
         const FHitResult& SweepResult);
@@ -189,6 +190,7 @@ public:
     void ActivateCheckpoint(const FVector& Location);
     void TryFinish();
     void RestartRun();
+    void ShowMessage(const FString& Text, float Seconds = 2.5f);
     int32 Collected = 0;
     int32 Total = 3;
     int32 Deaths = 0;
@@ -196,7 +198,7 @@ public:
     bool Finished = false;
     bool PlateActivated = false;
     FString Message;
-    FString Objective = TEXT("WASD 绉诲姩");
+    FString Objective = TEXT("完成三项试炼，收集能量核心并开启遗迹大门");
     bool bMovementTutorialDone = false;
     bool bJumpTutorialDone = false;
 private:
@@ -209,6 +211,9 @@ private:
     float AuditElapsed = 0.f;
     float AuditNextStep = 1.f;
     int32 AuditStep = 0;
+    float MessageUntil = 0.f;
+    bool bNearBlueEntrance = false;
+    bool bNearLockedEntrance = false;
     void BuildCourse();
     void SpawnPlayer();
     void RunAuditStep();
