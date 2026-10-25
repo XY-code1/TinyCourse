@@ -137,6 +137,7 @@ void ATinyCharacter::SetupPlayerInputComponent(UInputComponent* Input)
     Input->BindAction("Crouch", IE_Pressed, this, &ATinyCharacter::CrouchPressed);
     Input->BindAction("Crouch", IE_Released, this, &ATinyCharacter::CrouchReleased);
     Input->BindAction("Restart", IE_Pressed, this, &ATinyCharacter::RestartRun);
+    Input->BindAction("Pause", IE_Pressed, this, &ATinyCharacter::PausePressed).bExecuteWhenPaused = true;
 }
 
 void ATinyCharacter::Forward(float V) { if (Controller && V) { AddMovementInput(FRotationMatrix(FRotator(0, Controller->GetControlRotation().Yaw, 0)).GetUnitAxis(EAxis::X), V); bMoved = true; } }
@@ -159,6 +160,7 @@ void ATinyCharacter::Tick(float Dt)
     }
 }
 void ATinyCharacter::RestartRun() { if (auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()) GM->RestartRun(); }
+void ATinyCharacter::PausePressed() { if (auto* GM=GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()) GM->TogglePauseMenu(); }
 
 APickup::APickup()
 {
@@ -212,7 +214,7 @@ void ATimedHazard::Tick(float Dt)
     Super::Tick(Dt); if(bSafe){bActive=false; Paint(Mesh,FLinearColor(.10f,.10f,.08f)); return;}
     Elapsed=FMath::Fmod(Elapsed+Dt,4.5f); const bool Warning=Elapsed>=2.f&&Elapsed<3.f; bActive=Elapsed>=3.f;
     Paint(Mesh,bActive?FLinearColor(.34f,.012f,.004f):(Warning?FLinearColor(.48f,.16f,.018f):FLinearColor(.11f,.08f,.045f)));
-    if(Warning&&!bWarnedOnce){bWarnedOnce=true; PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileWarning_Cue.CompileWarning_Cue"),.22f); UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RedFloorWarning"));}
+    if(Warning&&!bWarnedOnce){bWarnedOnce=true; PlayCue(this,TEXT("/Game/Audio/S_HazardWarning.S_HazardWarning"),.22f); UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RedFloorWarning"));}
 }
 void ATimedHazard::Hit(UPrimitiveComponent*,AActor* Other,UPrimitiveComponent*,int32,bool,const FHitResult&){if(bActive&&Cast<ATinyCharacter>(Other))GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->Fail();}
 void ATimedHazard::ForceSafe(){bSafe=true;bActive=false;Paint(Mesh,FLinearColor(.08f,.12f,.07f));}
@@ -321,7 +323,7 @@ void AStoneDoor::BeginPlay()
 {
     Super::BeginPlay();
 }
-void AStoneDoor::Open() { if (!bOpening&&!bOpened) { OpenElapsed = 0.f; bOpening = true; LockLight->SetLightColor(FLinearColor(.8f,.55f,.04f)); PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.35f); } }
+void AStoneDoor::Open() { if (!bOpening&&!bOpened) { OpenElapsed = 0.f; bOpening = true; LockLight->SetLightColor(FLinearColor(.8f,.55f,.04f)); PlayCue(this,TEXT("/Game/Audio/S_GateOpen.S_GateOpen"),.35f); } }
 void AStoneDoor::Tick(float Dt)
 {
     Super::Tick(Dt);
@@ -400,9 +402,53 @@ void ATinyHUD::DrawHUD()
     Super::DrawHUD();
     auto* GM = GetWorld()->GetAuthGameMode<ATinyCourseGameMode>();
     if (!GM || !Canvas) return;
-    DrawText(FString::Printf(TEXT("能量核心 %d/%d"), GM->Collected, GM->Total), FLinearColor::White, 45, 35, GEngine->GetLargeFont(), 1.1f, false);
-    if (!GM->Objective.IsEmpty()) DrawText(TEXT("当前目标：") + GM->Objective, FLinearColor(.75f,.88f,1), 45, 82, GEngine->GetLargeFont(), 1.f, false);
-    if (!GM->Message.IsEmpty()) DrawText(GM->Message, GM->Finished ? FLinearColor::Green : FLinearColor::Yellow, 45, 128, GEngine->GetLargeFont(), 1.f, false);
+    const float W=Canvas->SizeX,H=Canvas->SizeY;
+    auto Button=[this,W](const TCHAR* Label,const TCHAR* Name,float Y)
+    {
+        const float X=W*.36f,BW=W*.28f,BH=46.f; DrawRect(FLinearColor(.08f,.11f,.15f,.94f),X,Y,BW,BH);
+        DrawText(Label,FLinearColor(.88f,.92f,1.f),X+20,Y+11,GEngine->GetLargeFont(),1.f,false);
+        AddHitBox(FVector2D(X,Y),FVector2D(BW,BH),FName(Name),true);
+    };
+    if(GM->MenuPage!=0)
+    {
+        DrawRect(FLinearColor(.01f,.015f,.025f,.92f),W*.24f,H*.10f,W*.52f,H*.80f);
+        if(GM->MenuPage==1)
+        {
+            DrawText(TEXT("《三核遗迹》"),FLinearColor(.92f,.78f,.35f),W*.36f,H*.19f,GEngine->GetLargeFont(),1.8f,false);
+            Button(TEXT("开始游戏"),TEXT("Start"),H*.34f); Button(TEXT("操作说明"),TEXT("Help"),H*.44f);
+            Button(TEXT("画面设置"),TEXT("Graphics"),H*.54f); Button(TEXT("退出游戏"),TEXT("Exit"),H*.64f);
+        }
+        else if(GM->MenuPage==2)
+        {
+            DrawText(TEXT("操作说明"),FLinearColor(.92f,.78f,.35f),W*.36f,H*.18f,GEngine->GetLargeFont(),1.5f,false);
+            DrawText(TEXT("WASD：移动\n鼠标：调整视角\n空格：跳跃\nC / 左Ctrl：蹲伏\nEsc：暂停"),FLinearColor::White,W*.33f,H*.31f,GEngine->GetLargeFont(),1.05f,false);
+            Button(TEXT("返回"),TEXT("Back"),H*.70f);
+        }
+        else if(GM->MenuPage==3)
+        {
+            DrawText(TEXT("画面设置"),FLinearColor(.92f,.78f,.35f),W*.36f,H*.18f,GEngine->GetLargeFont(),1.5f,false);
+            Button(TEXT("低画质"),TEXT("Low"),H*.32f); Button(TEXT("中画质（默认）"),TEXT("Medium"),H*.43f);
+            Button(TEXT("高画质"),TEXT("High"),H*.54f); Button(TEXT("返回"),TEXT("Back"),H*.68f);
+        }
+        else
+        {
+            DrawText(TEXT("游戏暂停"),FLinearColor(.92f,.78f,.35f),W*.36f,H*.19f,GEngine->GetLargeFont(),1.6f,false);
+            Button(TEXT("继续游戏"),TEXT("Resume"),H*.34f); Button(TEXT("重新开始"),TEXT("Restart"),H*.44f);
+            Button(TEXT("返回主菜单"),TEXT("MainMenu"),H*.54f); Button(TEXT("退出游戏"),TEXT("Exit"),H*.64f);
+        }
+        return;
+    }
+    if(!GM->Finished)
+    {
+        DrawRect(FLinearColor(.015f,.02f,.03f,.72f),25,20,FMath::Min(610.f,W*.78f),100);
+        DrawText(FString::Printf(TEXT("能量核心 %d/%d"), GM->Collected, GM->Total), FLinearColor::White, 45, 35, GEngine->GetLargeFont(), 1.05f, false);
+        if (!GM->Objective.IsEmpty()) DrawText(TEXT("当前目标：") + GM->Objective, FLinearColor(.75f,.88f,1), 45, 78, GEngine->GetLargeFont(), .92f, false);
+        if (!GM->Message.IsEmpty())
+        {
+            const float BW=FMath::Min(760.f,W*.78f); DrawRect(FLinearColor(.015f,.02f,.03f,.82f),(W-BW)*.5f,H-105,BW,58);
+            DrawText(GM->Message,FLinearColor(.98f,.82f,.25f),(W-BW)*.5f+20,H-89,GEngine->GetLargeFont(),.95f,false);
+        }
+    }
     if(GM->Finished)
     {
         const FString Grade=(GM->Time<240.f&&GM->Deaths<=2)?TEXT("S"):(GM->Time<360.f?TEXT("A"):TEXT("B"));
@@ -413,13 +459,23 @@ void ATinyHUD::DrawHUD()
         DrawText(FString::Printf(TEXT("失败次数：%d"),GM->Deaths),FLinearColor::White,X,Y+120,GEngine->GetLargeFont(),1.1f,false);
         DrawText(TEXT("获得核心：3/3"),FLinearColor::White,X,Y+162,GEngine->GetLargeFont(),1.1f,false);
         DrawText(TEXT("评价：")+Grade,FLinearColor(.92f,.78f,.35f),X,Y+210,GEngine->GetLargeFont(),1.4f,false);
-        DrawText(TEXT("R：重新开始    Esc：退出"),FLinearColor(.72f,.85f,1.f),X,Y+275,GEngine->GetLargeFont(),1.f,false);
+        DrawText(TEXT("重新开始      返回主菜单      退出游戏"),FLinearColor(.72f,.85f,1.f),X,Y+275,GEngine->GetLargeFont(),1.f,false);
+        AddHitBox(FVector2D(X,Y+258),FVector2D(180,46),TEXT("Restart"),true);
+        AddHitBox(FVector2D(X+195,Y+258),FVector2D(170,46),TEXT("MainMenu"),true);
+        AddHitBox(FVector2D(X+380,Y+258),FVector2D(120,46),TEXT("Exit"),true);
     }
+}
+
+void ATinyHUD::NotifyHitBoxClick(FName BoxName)
+{
+    Super::NotifyHitBoxClick(BoxName);
+    if(auto* GM=GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()) GM->HandleMenuAction(BoxName);
 }
 
 ATinyCourseGameMode::ATinyCourseGameMode()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bTickEvenWhenPaused = true;
     DefaultPawnClass = ATinyCharacter::StaticClass();
     HUDClass = ATinyHUD::StaticClass();
 }
@@ -446,13 +502,20 @@ void ATinyCourseGameMode::BeginPlay()
     UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RunStarted cores=%d deaths=%d time=%.1f"),Collected,Deaths,Time);
     if(GRedAuditRestarted){UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RestartVerified cores=%d deaths=%d time=%.1f"),Collected,Deaths,Time);FGenericPlatformMisc::RequestExit(false);return;}
     ShowMessage(TEXT("WASD：移动  鼠标：调整视角  Space：跳跃  C/左Ctrl：下蹲"), 6.f);
-    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("YellowSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("RedEndingCapture"));
+    const bool bReleaseCapture=FParse::Param(FCommandLine::Get(),TEXT("ReleaseCapture"));
+    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("YellowSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("RedEndingCapture")) || bReleaseCapture;
     if (bAuditCapture) IFileManager::Get().MakeDirectory(*(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit")), true);
+    if(!bAuditCapture||bReleaseCapture)
+    {
+        MenuPage=1; UGameplayStatics::SetGamePaused(this,true);
+        if(auto* PC=UGameplayStatics::GetPlayerController(this,0)){PC->bShowMouseCursor=true;PC->SetInputMode(FInputModeGameAndUI());}
+    }
+    else MenuPage=0;
 }
 void ATinyCourseGameMode::Tick(float Dt)
 {
     Super::Tick(Dt);
-    if (!Finished) Time += Dt;
+    if (!Finished && !UGameplayStatics::IsGamePaused(this)) Time += Dt;
     if (auto* P = UGameplayStatics::GetPlayerPawn(this, 0); P && P->GetActorLocation().Z < -500.f) Fail();
     if (MessageUntil > 0.f && GetWorld()->TimeSeconds >= MessageUntil) { Message.Empty(); MessageUntil = 0.f; }
     if (auto* P = UGameplayStatics::GetPlayerPawn(this, 0); P && GetWorld()->GetMapName().Contains(TEXT("L_RuinsChambers")))
@@ -495,6 +558,33 @@ void ATinyCourseGameMode::RunAuditStep()
     {
         FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit") / Name, false, false);
     };
+    if(FParse::Param(FCommandLine::Get(),TEXT("ReleaseCapture")))
+    {
+        switch(AuditStep++)
+        {
+        case 0: Shot(TEXT("50_main_menu.png")); break;
+        case 1: HandleMenuAction(TEXT("Help")); UE_LOG(LogTemp,Display,TEXT("RC_EVENT HelpMenuOpened")); break;
+        case 2: HandleMenuAction(TEXT("Graphics")); HandleMenuAction(TEXT("Low")); HandleMenuAction(TEXT("Medium")); HandleMenuAction(TEXT("Back")); HandleMenuAction(TEXT("Start")); UE_LOG(LogTemp,Display,TEXT("RC_EVENT MenuAndGraphicsPassed")); break;
+        case 3: Move(FVector(-2050,0,140)); Face(0); Shot(TEXT("51_hall.png")); break;
+        case 4: TogglePauseMenu(); UE_LOG(LogTemp,Display,TEXT("RC_EVENT PauseOpened paused=%d"),UGameplayStatics::IsGamePaused(this)); break;
+        case 5: TogglePauseMenu(); UE_LOG(LogTemp,Display,TEXT("RC_EVENT PauseResumed paused=%d"),UGameplayStatics::IsGamePaused(this)); break;
+        case 6: Move(FVector(-1500,-1180,128)); Face(-90); Shot(TEXT("52_blue_trial.png")); break;
+        case 7: Move(FVector(-1580,-3020,340)); break;
+        case 8: Move(FVector(-1500,1600,220)); Face(90); Shot(TEXT("53_yellow_trial.png")); break;
+        case 9: Move(FVector(-1300,3590,480)); break;
+        case 10: Move(FVector(-120,1350,150)); Face(90); Shot(TEXT("54_red_trial.png")); break;
+        case 11: Move(FVector(250,3770,200)); break;
+        case 12: Move(FVector(-1030,0,145)); Face(0); break;
+        case 13: break;
+        case 14: Move(FVector(-900,0,145)); Face(0); Shot(TEXT("55_gate_open.png")); break;
+        case 15: Move(FVector(0,0,145)); break;
+        case 16: Move(FVector(300,0,220)); break;
+        case 17: Shot(TEXT("56_ending.png")); break;
+        case 18: GRedAuditRestarted=true; RestartRun(); break;
+        default:bAuditCapture=false;break;
+        }
+        return;
+    }
     if(FParse::Param(FCommandLine::Get(),TEXT("RedEndingCapture")))
     {
         switch(AuditStep++)
@@ -698,6 +788,37 @@ void ATinyCourseGameMode::SpawnPlayer()
 }
 
 void ATinyCourseGameMode::ShowMessage(const FString& Text, float Seconds) { Message = Text; MessageUntil = GetWorld()->TimeSeconds + Seconds; }
+void ATinyCourseGameMode::HandleMenuAction(FName Action)
+{
+    auto* PC=UGameplayStatics::GetPlayerController(this,0);
+    if(Action==TEXT("Start")||Action==TEXT("Resume"))
+    {
+        MenuPage=0; UGameplayStatics::SetGamePaused(this,false); if(PC){PC->bShowMouseCursor=false;PC->SetInputMode(FInputModeGameOnly());}
+    }
+    else if(Action==TEXT("Help")) MenuPage=2;
+    else if(Action==TEXT("Graphics")) MenuPage=3;
+    else if(Action==TEXT("Back")) MenuPage=1;
+    else if(Action==TEXT("Restart")) RestartRun();
+    else if(Action==TEXT("MainMenu")) UGameplayStatics::OpenLevel(this,FName(*GetWorld()->GetName()),false);
+    else if(Action==TEXT("Exit")) FGenericPlatformMisc::RequestExit(false);
+    else if(PC&&(Action==TEXT("Low")||Action==TEXT("Medium")||Action==TEXT("High")))
+    {
+        const int32 Q=Action==TEXT("Low")?0:(Action==TEXT("Medium")?1:2);
+        for(const TCHAR* C:{TEXT("sg.ViewDistanceQuality"),TEXT("sg.AntiAliasingQuality"),TEXT("sg.ShadowQuality"),TEXT("sg.PostProcessQuality"),TEXT("sg.TextureQuality"),TEXT("sg.EffectsQuality")})
+            PC->ConsoleCommand(FString::Printf(TEXT("%s %d"),C,Q));
+        ShowMessage(Q==0?TEXT("已应用低画质"):Q==1?TEXT("已应用中画质"):TEXT("已应用高画质"),3.f);
+    }
+}
+void ATinyCourseGameMode::TogglePauseMenu()
+{
+    if(Finished||MenuPage==1||MenuPage==2||MenuPage==3)return;
+    if(MenuPage==4)HandleMenuAction(TEXT("Resume"));
+    else
+    {
+        MenuPage=4; UGameplayStatics::SetGamePaused(this,true);
+        if(auto* PC=UGameplayStatics::GetPlayerController(this,0)){PC->bShowMouseCursor=true;PC->SetInputMode(FInputModeGameAndUI());}
+    }
+}
 void ATinyCourseGameMode::UnlockYellowTrial()
 {
     if (YellowGate)
@@ -721,7 +842,7 @@ void ATinyCourseGameMode::UnlockRedTrial()
         RedSign->GetTextRender()->SetText(FText::FromString(TEXT("红色试炼：观察预警，掌握机关节奏")));
         RedSign->GetTextRender()->SetTextRenderColor(FColor(235,90,55));
     }
-    PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.30f);
+    PlayCue(this,TEXT("/Game/Audio/S_EntranceUnlock.S_EntranceUnlock"),.30f);
     ShowMessage(TEXT("红色试炼已开启"),4.f); Objective=TEXT("前往红色试炼，观察预警，掌握机关节奏");
     UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RedTrialUnlocked"));
 }
@@ -745,7 +866,7 @@ void ATinyCourseGameMode::TakePickup()
         DisableRedHazards(); ShowMessage(TEXT("三枚能量核心已集齐，返回中央大厅"),4.f);
         Objective = TEXT("三枚能量核心已集齐，返回中央大厅");
     }
-    PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.28f);
+    PlayCue(this,TEXT("/Game/Audio/S_CoreCollect.S_CoreCollect"),.28f);
     UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CoreCollected %d/%d"), Collected, Total);
 }
 void ATinyCourseGameMode::PressPlate()
@@ -775,6 +896,6 @@ void ATinyCourseGameMode::ActivateCheckpoint(const FVector& Location)
     ShowMessage(TEXT("检查点已激活")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CheckpointActivated %s"), *Location.ToCompactString());
 }
 void ATinyCourseGameMode::Fail() { ++Deaths; ShowMessage(TEXT("观察机关节奏后再前进")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT FailRespawn deaths=%d point=%s"), Deaths, *RespawnPoint.ToCompactString()); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
-void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("收集全部核心并激活压力板"); return; } Finished = true; Objective.Empty(); Message.Empty(); PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.4f); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT GoalComplete time=%.1f deaths=%d grade=%s"), Time, Deaths,*((Time<240.f&&Deaths<=2)?FString(TEXT("S")):(Time<360.f?FString(TEXT("A")):FString(TEXT("B"))))); }
+void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("收集全部核心并激活压力板"); return; } Finished = true; Objective.Empty(); Message.Empty(); PlayCue(this,TEXT("/Game/Audio/S_Victory.S_Victory"),.4f); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT GoalComplete time=%.1f deaths=%d grade=%s"), Time, Deaths,*((Time<240.f&&Deaths<=2)?FString(TEXT("S")):(Time<360.f?FString(TEXT("A")):FString(TEXT("B"))))); }
 void ATinyCourseGameMode::RestartRun() { UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()), false); }
 

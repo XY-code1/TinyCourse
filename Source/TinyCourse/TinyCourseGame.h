@@ -52,6 +52,7 @@ private:
     void JumpReleased();
     void CrouchPressed();
     void CrouchReleased();
+    void PausePressed();
     void RestartRun();
     float CoyoteRemaining = 0.f;
     float JumpBufferRemaining = 0.f;
@@ -231,6 +232,7 @@ class TINYCOURSE_API ATinyHUD : public AHUD
     GENERATED_BODY()
 public:
     virtual void DrawHUD() override;
+    virtual void NotifyHitBoxClick(FName BoxName) override;
 };
 
 UCLASS()
@@ -258,6 +260,9 @@ public:
     FString Objective = TEXT("完成三项试炼，收集能量核心并开启遗迹大门");
     bool bMovementTutorialDone = false;
     bool bJumpTutorialDone = false;
+    int32 MenuPage = 1; // 0 game, 1 main, 2 help, 3 graphics, 4 pause
+    void HandleMenuAction(FName Action);
+    void TogglePauseMenu();
 private:
     FVector Start = FVector(-900, 0, 120);
     FVector RespawnPoint = Start;
