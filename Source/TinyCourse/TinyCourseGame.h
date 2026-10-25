@@ -91,6 +91,46 @@ private:
 };
 
 UCLASS()
+class TINYCOURSE_API ATimedHazard : public AActor
+{
+    GENERATED_BODY()
+public:
+    ATimedHazard();
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hazard") float PhaseOffset = 0.f;
+    void ForceSafe();
+    void SetAuditWarning();
+    void SetAuditActive();
+private:
+    UPROPERTY() UStaticMeshComponent* Mesh;
+    float Elapsed = 0.f;
+    bool bActive = false;
+    bool bSafe = false;
+    bool bWarnedOnce = false;
+    UFUNCTION() void Hit(UPrimitiveComponent* Overlapped, AActor* Other, UPrimitiveComponent* OtherComponent, int32 BodyIndex, bool bFromSweep, const FHitResult& Sweep);
+};
+
+UCLASS()
+class TINYCOURSE_API ASweepingHazard : public AActor
+{
+    GENERATED_BODY()
+public:
+    ASweepingHazard();
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hazard") FVector TravelOffset = FVector(700.f,0,0);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hazard") float SweepSpeed = .75f;
+    void ForceSafe();
+private:
+    UPROPERTY() UStaticMeshComponent* Mesh;
+    FVector Origin;
+    float Elapsed = 0.f;
+    bool bSafe = false;
+    UFUNCTION() void Hit(UPrimitiveComponent* Overlapped, AActor* Other, UPrimitiveComponent* OtherComponent, int32 BodyIndex, bool bFromSweep, const FHitResult& Sweep);
+};
+
+UCLASS()
 class TINYCOURSE_API AMovingPlatform : public AActor
 {
     GENERATED_BODY()
@@ -135,6 +175,7 @@ private:
     UPROPERTY() UPointLightComponent* RightRimLight;
     float OpenElapsed = 0.f;
     bool bOpening = false;
+    bool bOpened = false;
 };
 
 UCLASS()
@@ -233,9 +274,14 @@ private:
     bool bNearMovingPlatform = false;
     bool bNearCrouchTunnel = false;
     bool bNearLockedEntrance = false;
+    bool bNearRedTrial = false;
     UPROPERTY() AActor* YellowGate = nullptr;
     UPROPERTY() ATextRenderActor* YellowSign = nullptr;
+    UPROPERTY() AActor* RedGate = nullptr;
+    UPROPERTY() ATextRenderActor* RedSign = nullptr;
     void UnlockYellowTrial();
+    void UnlockRedTrial();
+    void DisableRedHazards();
     void BuildCourse();
     void SpawnPlayer();
     void RunAuditStep();

@@ -31,6 +31,9 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "UnrealClient.h"
+#include "Sound/SoundBase.h"
+
+static bool GRedAuditRestarted=false;
 
 static UStaticMesh* CubeMesh()
 {
@@ -52,6 +55,11 @@ static void Paint(UStaticMeshComponent* Mesh, const FLinearColor& Color)
     auto* Material = UMaterialInstanceDynamic::Create(Base, Mesh);
     Material->SetVectorParameterValue(TEXT("Color"), Color);
     Mesh->SetMaterial(0, Material);
+}
+
+static void PlayCue(UObject* Context, const TCHAR* Asset, float Volume=.35f)
+{
+    if (auto* Sound=LoadObject<USoundBase>(nullptr,Asset)) UGameplayStatics::PlaySound2D(Context,Sound,Volume);
 }
 
 ACourseBlock::ACourseBlock()
@@ -164,7 +172,7 @@ APickup::APickup()
     Paint(Mesh, FLinearColor(0.f, .8f, 1.f));
     Mesh->OnComponentBeginOverlap.AddDynamic(this, &APickup::Collected);
 }
-void APickup::BeginPlay() { Super::BeginPlay(); Paint(Mesh, ActorHasTag(TEXT("YellowCore")) ? FLinearColor(1.f,.55f,.03f) : FLinearColor(0.f,.8f,1.f)); }
+void APickup::BeginPlay() { Super::BeginPlay(); Paint(Mesh, ActorHasTag(TEXT("RedCore"))?FLinearColor(.8f,.025f,.008f):(ActorHasTag(TEXT("YellowCore")) ? FLinearColor(1.f,.55f,.03f) : FLinearColor(0.f,.8f,1.f))); }
 void APickup::Tick(float Dt) { Super::Tick(Dt); AddActorLocalRotation(FRotator(0, 100.f * Dt, 0)); }
 void APickup::Collected(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&)
 {
@@ -172,7 +180,7 @@ void APickup::Collected(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent
     auto* Flash = GetWorld()->SpawnActor<APointLight>(APointLight::StaticClass(), GetActorLocation(), FRotator::ZeroRotator);
     auto* FlashLight = CastChecked<UPointLightComponent>(Flash->GetLightComponent());
     FlashLight->SetIntensity(9000.f);
-    FlashLight->SetLightColor(ActorHasTag(TEXT("YellowCore")) ? FLinearColor(1.f,.45f,.02f) : FLinearColor(.05f,.55f,1.f));
+    FlashLight->SetLightColor(ActorHasTag(TEXT("RedCore"))?FLinearColor(1.f,.04f,.01f):(ActorHasTag(TEXT("YellowCore")) ? FLinearColor(1.f,.45f,.02f) : FLinearColor(.05f,.55f,1.f)));
     FlashLight->SetAttenuationRadius(450.f);
     Flash->SetLifeSpan(.45f);
     GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->TakePickup();
@@ -191,6 +199,36 @@ AHazard::AHazard()
 }
 void AHazard::BeginPlay() { Super::BeginPlay(); Paint(Mesh, FLinearColor(.12f, .008f, .004f)); }
 void AHazard::Hit(UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool, const FHitResult&) { if (Cast<ATinyCharacter>(Other)) GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->Fail(); }
+
+ATimedHazard::ATimedHazard()
+{
+    PrimaryActorTick.bCanEverTick=true; Mesh=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TimedHazard")); RootComponent=Mesh;
+    Mesh->SetStaticMesh(CubeMesh()); Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic")); Mesh->SetGenerateOverlapEvents(true);
+    Mesh->OnComponentBeginOverlap.AddDynamic(this,&ATimedHazard::Hit);
+}
+void ATimedHazard::BeginPlay(){Super::BeginPlay(); Elapsed=PhaseOffset; Paint(Mesh,FLinearColor(.12f,.06f,.025f));}
+void ATimedHazard::Tick(float Dt)
+{
+    Super::Tick(Dt); if(bSafe){bActive=false; Paint(Mesh,FLinearColor(.10f,.10f,.08f)); return;}
+    Elapsed=FMath::Fmod(Elapsed+Dt,4.5f); const bool Warning=Elapsed>=2.f&&Elapsed<3.f; bActive=Elapsed>=3.f;
+    Paint(Mesh,bActive?FLinearColor(.34f,.012f,.004f):(Warning?FLinearColor(.48f,.16f,.018f):FLinearColor(.11f,.08f,.045f)));
+    if(Warning&&!bWarnedOnce){bWarnedOnce=true; PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileWarning_Cue.CompileWarning_Cue"),.22f); UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RedFloorWarning"));}
+}
+void ATimedHazard::Hit(UPrimitiveComponent*,AActor* Other,UPrimitiveComponent*,int32,bool,const FHitResult&){if(bActive&&Cast<ATinyCharacter>(Other))GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->Fail();}
+void ATimedHazard::ForceSafe(){bSafe=true;bActive=false;Paint(Mesh,FLinearColor(.08f,.12f,.07f));}
+void ATimedHazard::SetAuditWarning(){bSafe=false;Elapsed=2.25f;bActive=false;Paint(Mesh,FLinearColor(.48f,.16f,.018f));}
+void ATimedHazard::SetAuditActive(){bSafe=false;Elapsed=3.2f;bActive=true;Paint(Mesh,FLinearColor(.34f,.012f,.004f));}
+
+ASweepingHazard::ASweepingHazard()
+{
+    PrimaryActorTick.bCanEverTick=true; Mesh=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Sweeper")); RootComponent=Mesh;
+    Mesh->SetStaticMesh(CubeMesh()); Mesh->SetMobility(EComponentMobility::Movable); Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    Mesh->SetGenerateOverlapEvents(true); Mesh->OnComponentBeginOverlap.AddDynamic(this,&ASweepingHazard::Hit);
+}
+void ASweepingHazard::BeginPlay(){Super::BeginPlay();Origin=GetActorLocation();Paint(Mesh,FLinearColor(.34f,.015f,.006f));}
+void ASweepingHazard::Tick(float Dt){Super::Tick(Dt);Elapsed+=Dt;if(!bSafe)SetActorLocation(Origin+TravelOffset*(.5f+.5f*FMath::Sin(Elapsed*SweepSpeed)),true);}
+void ASweepingHazard::Hit(UPrimitiveComponent*,AActor* Other,UPrimitiveComponent*,int32,bool,const FHitResult&){if(!bSafe&&Elapsed>2.f&&Cast<ATinyCharacter>(Other))GetWorld()->GetAuthGameMode<ATinyCourseGameMode>()->Fail();}
+void ASweepingHazard::ForceSafe(){bSafe=true;Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);Paint(Mesh,FLinearColor(.08f,.12f,.07f));}
 
 AMovingPlatform::AMovingPlatform()
 {
@@ -283,7 +321,7 @@ void AStoneDoor::BeginPlay()
 {
     Super::BeginPlay();
 }
-void AStoneDoor::Open() { if (!bOpening) { OpenElapsed = 0.f; bOpening = true; LockLight->SetLightColor(FLinearColor(.01f,.8f,.08f)); } }
+void AStoneDoor::Open() { if (!bOpening&&!bOpened) { OpenElapsed = 0.f; bOpening = true; LockLight->SetLightColor(FLinearColor(.8f,.55f,.04f)); PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.35f); } }
 void AStoneDoor::Tick(float Dt)
 {
     Super::Tick(Dt);
@@ -296,8 +334,10 @@ void AStoneDoor::Tick(float Dt)
     if (Alpha >= 1.f)
     {
         bOpening = false;
+        bOpened = true;
         LeftLeaf->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         RightLeaf->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT DoorOpened collision=disabled"));
     }
 }
 
@@ -363,6 +403,18 @@ void ATinyHUD::DrawHUD()
     DrawText(FString::Printf(TEXT("能量核心 %d/%d"), GM->Collected, GM->Total), FLinearColor::White, 45, 35, GEngine->GetLargeFont(), 1.1f, false);
     if (!GM->Objective.IsEmpty()) DrawText(TEXT("当前目标：") + GM->Objective, FLinearColor(.75f,.88f,1), 45, 82, GEngine->GetLargeFont(), 1.f, false);
     if (!GM->Message.IsEmpty()) DrawText(GM->Message, GM->Finished ? FLinearColor::Green : FLinearColor::Yellow, 45, 128, GEngine->GetLargeFont(), 1.f, false);
+    if(GM->Finished)
+    {
+        const FString Grade=(GM->Time<240.f&&GM->Deaths<=2)?TEXT("S"):(GM->Time<360.f?TEXT("A"):TEXT("B"));
+        DrawRect(FLinearColor(0.015f,.02f,.03f,.90f),Canvas->SizeX*.22f,Canvas->SizeY*.20f,Canvas->SizeX*.56f,Canvas->SizeY*.58f);
+        const float X=Canvas->SizeX*.34f,Y=Canvas->SizeY*.29f;
+        DrawText(TEXT("遗迹试炼完成"),FLinearColor(.92f,.78f,.35f),X,Y,GEngine->GetLargeFont(),1.7f,false);
+        DrawText(FString::Printf(TEXT("通关时间：%.1f 秒"),GM->Time),FLinearColor::White,X,Y+78,GEngine->GetLargeFont(),1.1f,false);
+        DrawText(FString::Printf(TEXT("失败次数：%d"),GM->Deaths),FLinearColor::White,X,Y+120,GEngine->GetLargeFont(),1.1f,false);
+        DrawText(TEXT("获得核心：3/3"),FLinearColor::White,X,Y+162,GEngine->GetLargeFont(),1.1f,false);
+        DrawText(TEXT("评价：")+Grade,FLinearColor(.92f,.78f,.35f),X,Y+210,GEngine->GetLargeFont(),1.4f,false);
+        DrawText(TEXT("R：重新开始    Esc：退出"),FLinearColor(.72f,.85f,1.f),X,Y+275,GEngine->GetLargeFont(),1.f,false);
+    }
 }
 
 ATinyCourseGameMode::ATinyCourseGameMode()
@@ -382,15 +434,19 @@ void ATinyCourseGameMode::BeginPlay()
         for (TActorIterator<AActor> It(GetWorld()); It; ++It)
         {
             if (It->ActorHasTag(TEXT("YellowGate"))) YellowGate = *It;
+            if (It->ActorHasTag(TEXT("RedGate"))) RedGate = *It;
         }
         for (TActorIterator<ATextRenderActor> It(GetWorld()); It; ++It)
         {
             if (It->ActorHasTag(TEXT("YellowSign"))) YellowSign = *It;
+            if (It->ActorHasTag(TEXT("RedSign"))) RedSign = *It;
         }
     }
     SpawnPlayer();
+    UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RunStarted cores=%d deaths=%d time=%.1f"),Collected,Deaths,Time);
+    if(GRedAuditRestarted){UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RestartVerified cores=%d deaths=%d time=%.1f"),Collected,Deaths,Time);FGenericPlatformMisc::RequestExit(false);return;}
     ShowMessage(TEXT("WASD：移动  鼠标：调整视角  Space：跳跃  C/左Ctrl：下蹲"), 6.f);
-    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("YellowSliceCapture"));
+    bAuditCapture = FParse::Param(FCommandLine::Get(), TEXT("CourseAuditCapture")) || FParse::Param(FCommandLine::Get(), TEXT("BlueSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("VisualAcceptanceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("YellowSliceCapture")) || FParse::Param(FCommandLine::Get(), TEXT("RedEndingCapture"));
     if (bAuditCapture) IFileManager::Get().MakeDirectory(*(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit")), true);
 }
 void ATinyCourseGameMode::Tick(float Dt)
@@ -407,9 +463,11 @@ void ATinyCourseGameMode::Tick(float Dt)
         const bool NearMoving = FVector::Dist2D(L, FVector(-1300,1450,0)) < 480.f;
         const bool NearCrouch = FVector::Dist2D(L, FVector(-1300,2450,0)) < 390.f;
         const bool NearLocked = FVector::Dist2D(L, FVector(-650,760,0)) < 420.f;
+        const bool NearRed = FVector::Dist2D(L,FVector(-650,1050,0))<560.f;
         if (NearBlue && !bNearBlueEntrance && Collected == 0) { Objective = TEXT("蓝色试炼：掌握跳跃"); }
         else if (!NearBlue && bNearBlueEntrance && Collected == 0) { Objective = TEXT("前往蓝色试炼，收集能量核心"); }
-        if (NearLocked && !bNearLockedEntrance) ShowMessage(TEXT("尚未开放"), 1.5f);
+        if (NearLocked && !bNearLockedEntrance && Collected<2) ShowMessage(TEXT("尚未开放"), 1.5f);
+        if(NearRed&&!bNearRedTrial&&Collected>=2) Objective=TEXT("红色试炼：观察预警，掌握机关节奏");
         if (NearYellow && !bNearYellowEntrance && Collected >= 1) Objective = TEXT("黄色试炼：观察平台的移动节奏");
         if (NearMoving && !bNearMovingPlatform) ShowMessage(TEXT("等待合适时机，再踏上平台"), 3.f);
         if (NearCrouch && !bNearCrouchTunnel) ShowMessage(TEXT("按住 C 或左 Ctrl 蹲伏通过"), 4.f);
@@ -418,6 +476,7 @@ void ATinyCourseGameMode::Tick(float Dt)
         bNearMovingPlatform = NearMoving;
         bNearCrouchTunnel = NearCrouch;
         bNearLockedEntrance = NearLocked;
+        bNearRedTrial=NearRed;
     }
     if (bAuditCapture)
     {
@@ -436,6 +495,33 @@ void ATinyCourseGameMode::RunAuditStep()
     {
         FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / TEXT("Screenshots/Audit") / Name, false, false);
     };
+    if(FParse::Param(FCommandLine::Get(),TEXT("RedEndingCapture")))
+    {
+        switch(AuditStep++)
+        {
+        case 0: Move(FVector(-1580,-3020,340)); break;
+        case 1: Move(FVector(-1300,3590,480)); break;
+        case 2: Move(FVector(-650,620,140)); Face(90); break;
+        case 3: Shot(TEXT("40_red_entrance_unlocked.png")); break;
+        case 4: Move(FVector(-120,1350,150)); Face(90); break;
+        case 5: for(TActorIterator<ATimedHazard> It(GetWorld());It;++It){It->SetAuditWarning();break;} Shot(TEXT("41_red_floor_warning.png")); break;
+        case 6: Move(FVector(480,2050,155)); Face(90); Shot(TEXT("42_red_sweeper.png")); break;
+        case 7: Move(FVector(-120,1300,170)); break;
+        case 8: for(TActorIterator<ATimedHazard> It(GetWorld());It;++It){It->SetAuditActive();Move(It->GetActorLocation()+FVector(0,0,110));break;} break;
+        case 9: Move(FVector(250,2600,170)); break;
+        case 10: Move(FVector(250,3770,200)); break;
+        case 11: Shot(TEXT("43_hud_3of3.png")); break;
+        case 12: Move(FVector(-1030,0,145)); Face(0); break;
+        case 13: break;
+        case 14: Move(FVector(-900,0,145)); Face(0); Shot(TEXT("44_gate_open.png")); break;
+        case 15: Move(FVector(0,0,145)); UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT DoorPassageReached")); break;
+        case 16: Move(FVector(300,0,220)); break;
+        case 17: Shot(TEXT("45_ending_panel.png")); break;
+        case 18: GRedAuditRestarted=true; RestartRun(); break;
+        default:bAuditCapture=false;break;
+        }
+        return;
+    }
     if (FParse::Param(FCommandLine::Get(), TEXT("YellowSliceCapture")))
     {
         switch (AuditStep++)
@@ -627,6 +713,24 @@ void ATinyCourseGameMode::UnlockYellowTrial()
     Objective = TEXT("前往黄色试炼，观察平台的移动节奏");
     UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT YellowTrialUnlocked"));
 }
+void ATinyCourseGameMode::UnlockRedTrial()
+{
+    if(RedGate){RedGate->SetActorHiddenInGame(true);RedGate->SetActorEnableCollision(false);}
+    if(RedSign&&RedSign->GetTextRender())
+    {
+        RedSign->GetTextRender()->SetText(FText::FromString(TEXT("红色试炼：观察预警，掌握机关节奏")));
+        RedSign->GetTextRender()->SetTextRenderColor(FColor(235,90,55));
+    }
+    PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.30f);
+    ShowMessage(TEXT("红色试炼已开启"),4.f); Objective=TEXT("前往红色试炼，观察预警，掌握机关节奏");
+    UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RedTrialUnlocked"));
+}
+void ATinyCourseGameMode::DisableRedHazards()
+{
+    for(TActorIterator<ATimedHazard> It(GetWorld());It;++It)It->ForceSafe();
+    for(TActorIterator<ASweepingHazard> It(GetWorld());It;++It)It->ForceSafe();
+    UE_LOG(LogTemp,Display,TEXT("COURSE_EVENT RedHazardsSafe"));
+}
 void ATinyCourseGameMode::TakePickup()
 {
     if (Collected >= Total) return;
@@ -634,14 +738,14 @@ void ATinyCourseGameMode::TakePickup()
     if (Collected == 1) UnlockYellowTrial();
     else if (Collected == 2)
     {
-        ShowMessage(TEXT("已获得黄色核心，返回中央大厅"), 4.f);
-        Objective = TEXT("已获得黄色核心，返回中央大厅");
+        UnlockRedTrial();
     }
     else
     {
-        ShowMessage(FString::Printf(TEXT("获得能量核心  %d/%d"), Collected, Total), 4.f);
-        Objective = TEXT("核心已集齐，返回中央大厅");
+        DisableRedHazards(); ShowMessage(TEXT("三枚能量核心已集齐，返回中央大厅"),4.f);
+        Objective = TEXT("三枚能量核心已集齐，返回中央大厅");
     }
+    PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.28f);
     UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CoreCollected %d/%d"), Collected, Total);
 }
 void ATinyCourseGameMode::PressPlate()
@@ -654,7 +758,7 @@ void ATinyCourseGameMode::PressPlate()
         {
             auto* Flash = GetWorld()->SpawnActor<APointLight>(APointLight::StaticClass(), Plate->GetActorLocation()+FVector(0,0,80), FRotator::ZeroRotator);
             auto* FlashLight = CastChecked<UPointLightComponent>(Flash->GetLightComponent());
-            FlashLight->SetIntensity(6500.f); FlashLight->SetLightColor(FLinearColor(1.f,.08f,.02f));
+            FlashLight->SetIntensity(500.f); FlashLight->SetLightColor(FLinearColor(1.f,.12f,.03f));
             FlashLight->SetAttenuationRadius(300.f); Flash->SetLifeSpan(.35f);
         }
         UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT PlateDenied missing=%d"), Total-Collected);
@@ -670,7 +774,7 @@ void ATinyCourseGameMode::ActivateCheckpoint(const FVector& Location)
     RespawnPoint = Location;
     ShowMessage(TEXT("检查点已激活")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT CheckpointActivated %s"), *Location.ToCompactString());
 }
-void ATinyCourseGameMode::Fail() { ++Deaths; ShowMessage(TEXT("挑战失败，已返回检查点")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT FailRespawn deaths=%d point=%s"), Deaths, *RespawnPoint.ToCompactString()); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
-void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("Collect all cores and activate the pressure plate"); return; } Finished = true; Objective = TEXT("Trial complete"); Message = FString::Printf(TEXT("RUINS TRIAL COMPLETE  %.1f seconds  Press R to restart"), Time); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT GoalComplete time=%.1f deaths=%d"), Time, Deaths); }
+void ATinyCourseGameMode::Fail() { ++Deaths; ShowMessage(TEXT("观察机关节奏后再前进")); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT FailRespawn deaths=%d point=%s"), Deaths, *RespawnPoint.ToCompactString()); if (auto* P = UGameplayStatics::GetPlayerPawn(this,0)) { P->SetActorLocation(RespawnPoint); if (auto* C=Cast<ACharacter>(P)) C->GetCharacterMovement()->StopMovementImmediately(); } }
+void ATinyCourseGameMode::TryFinish() { if (Collected < Total || !PlateActivated) { Message = TEXT("收集全部核心并激活压力板"); return; } Finished = true; Objective.Empty(); Message.Empty(); PlayCue(this,TEXT("/Engine/EditorSounds/Notifications/CompileSuccess_Cue.CompileSuccess_Cue"),.4f); UE_LOG(LogTemp, Display, TEXT("COURSE_EVENT GoalComplete time=%.1f deaths=%d grade=%s"), Time, Deaths,*((Time<240.f&&Deaths<=2)?FString(TEXT("S")):(Time<360.f?FString(TEXT("A")):FString(TEXT("B"))))); }
 void ATinyCourseGameMode::RestartRun() { UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()), false); }
 

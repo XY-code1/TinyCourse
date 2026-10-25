@@ -28,7 +28,7 @@ material_instance('MI_AncientDoubleDoor_Bright', .62, (.42, .32, .24), 1.08, .80
 if unreal.EditorAssetLibrary.does_asset_exist(MAP): unreal.EditorAssetLibrary.delete_asset(MAP)
 unreal.EditorLevelLibrary.new_level(MAP)
 load = lambda n: unreal.load_class(None, '/Script/TinyCourse.' + n)
-C = {n: load(n) for n in ['CourseBlock', 'Pickup', 'Hazard', 'PressurePlate', 'StoneDoor', 'Checkpoint', 'MovingPlatform']}
+C = {n: load(n) for n in ['CourseBlock', 'Pickup', 'Hazard', 'PressurePlate', 'StoneDoor', 'Checkpoint', 'MovingPlatform', 'TimedHazard', 'SweepingHazard', 'Goal']}
 spawn, V = unreal.EditorLevelLibrary.spawn_actor_from_class, unreal.Vector
 COL = {'blue': unreal.LinearColor(.025,.16,.52,1), 'yellow': unreal.LinearColor(.42,.24,.025,1),
        'red': unreal.LinearColor(.26,.018,.01,1), 'green': unreal.LinearColor(.025,.32,.09,1)}
@@ -100,7 +100,8 @@ for name,x,color in [('Yellow',-1300,'yellow'),('Red',-650,'red')]:
     label=sign(name+'TrialSign',('黄色 尚未开放' if name=='Yellow' else '红色 尚未开放'),(x-150,800,470),-90,unreal.Color(220,200,155,255))
     if name=='Yellow':
         sealed.set_editor_property('tags',[unreal.Name('YellowGate')]); label.set_editor_property('tags',[unreal.Name('YellowSign')])
-    else: sealed.set_editor_property('tags',[unreal.Name('RedGate')])
+    else:
+        sealed.set_editor_property('tags',[unreal.Name('RedGate')]); label.set_editor_property('tags',[unreal.Name('RedSign')])
 
 plate=actor('PressurePlate','CentralPressurePlate',(-1030,0,30),(175,175,12))
 actor('StoneDoor','FinalStoneDoor',(-310,0,215),(120,120,120))
@@ -128,7 +129,7 @@ block('BlueReturnLanding',(-1120,-1170,75),(420,320,80),'stone')
 # The room is narrow and readable; yellow is limited to trims and machinery edges.
 block('YellowRoomFloor',(-1300,2450,-235),(1700,3100,50),'dark')
 block('YellowWestWall',(-2150,2450,285),(60,3100,1040),'dark')
-block('YellowEastWall',(-450,2450,285),(60,3100,1040),'dark')
+block('YellowEastWallA',(-450,925,285),(60,50,1040),'dark'); block('YellowEastWallB',(-450,2660,285),(60,2680,1040),'dark')
 block('YellowEndWall',(-1300,4000,285),(1700,60,1040),'dark')
 block('YellowCeiling',(-1300,2450,780),(1700,3100,50),'dark')
 block('YellowEntrySafe',(-1300,1120,20),(520,400,80),'stone')
@@ -172,6 +173,40 @@ lamp('YellowTimingFill',(-1300,1900,420),unreal.Color(225,180,100),320,950)
 lamp('YellowTunnelFill',(-1300,2520,115),unreal.Color(205,165,95),180,520)
 lamp('YellowLiftFill',(-1300,3300,480),unreal.Color(235,190,105),330,950)
 lamp('YellowCoreGuide',(-1300,3590,560),unreal.Color(255,175,45),360,600)
+
+# Red trial: readable warning cycles, one slow sweeper, alternating hazards and safe checkpoints.
+block('RedEntryDogleg',(-420,1120,20),(560,360,80),'stone')
+block('RedRoomFloor',(250,2550,-180),(1300,3000,50),'dark')
+block('RedWestWall',(-400,2550,285),(60,3000,1040),'dark'); block('RedEastWall',(900,2550,285),(60,3000,1040),'dark')
+block('RedEndWall',(250,4050,285),(1300,60,1040),'dark'); block('RedCeiling',(250,2550,780),(1300,3000,50),'dark')
+block('RedEntrySafe',(-120,1320,35),(520,360,80),'stone'); actor('Checkpoint','Checkpoint_RedEntrance',(-120,1300,82),(150,100,10))
+edge('RedEntryLine',(-350,1180,82),(14,260,10),'red')
+
+floor1=actor('TimedHazard','RedWarningFloor1',(100,1720,20),(520,420,35)); floor1.set_editor_property('phase_offset',0.0)
+block('RedSafeIsland1',(480,2050,50),(330,330,70),'stone')
+sweeper=actor('SweepingHazard','RedSweeper',(0,2320,150),(90,620,34)); sweeper.set_editor_property('travel_offset',V(500,0,0)); sweeper.set_editor_property('sweep_speed',.72)
+block('RedMidSafe',(250,2630,35),(520,360,80),'stone'); actor('Checkpoint','Checkpoint_RedMid',(250,2600,82),(150,100,10))
+
+floor2=actor('TimedHazard','RedAlternatingA',(20,3050,20),(420,360,35)); floor2.set_editor_property('phase_offset',0.0)
+floor3=actor('TimedHazard','RedAlternatingB',(480,3370,20),(420,360,35)); floor3.set_editor_property('phase_offset',2.25)
+block('RedCoreLanding',(250,3770,55),(560,460,80),'stone'); edge('RedCoreTrim',(250,3560,98),(430,12,10),'red')
+red_core=actor('Pickup','Core_Red',(250,3770,200),(42,42,42)); red_core.set_editor_property('tags',[unreal.Name('RedCore')])
+sign('RedReturnSign','红色核心 / 返回中央大厅',(40,3970,430),-90,unreal.Color(235,90,55,255))
+
+# Safe return route remains independent from the active lane.
+block('RedReturnWalk',(780,2700,180),(220,2200,65),'stone'); block('RedReturnRamp',(520,1420,95),(620,720,70),'stone',(0,-12,0))
+for yy in (1700,2300,2900,3500): edge('RedGuide_%d'%yy,(790,yy,215),(12,150,10),'red')
+lamp('RedEntryFill',(-120,1350,370),unreal.Color(215,155,110),250,780)
+lamp('RedHazardFill',(250,2100,430),unreal.Color(220,145,100),285,950)
+lamp('RedMidFill',(250,2850,420),unreal.Color(210,155,115),270,900)
+lamp('RedCoreGuide',(250,3770,500),unreal.Color(230,75,45),300,650)
+
+# Gate destination and final portal.
+block('GoalRoomFloor',(250,0,-20),(1100,900,60),'stone'); block('GoalRoomCeiling',(250,0,620),(1100,900,50),'dark')
+block('GoalRoomNorth',(250,-450,300),(1100,60,600),'dark'); block('GoalRoomSouth',(250,450,300),(1100,60,600),'dark')
+goal=actor('Goal','FinalPortal',(300,0,220),(80,300,420))
+lamp('PortalFill',(300,0,300),unreal.Color(155,80,235),260,650)
+sign('GoalSign','终点传送门',(260,-180,500),0,unreal.Color(190,130,255,255))
 
 # Fixed, deliberately modest illumination. No white emissive architecture.
 sun=spawn(unreal.DirectionalLight,V(0,0,900)); sun.set_actor_label('Sun'); sun.set_actor_rotation(unreal.Rotator(-50,-25,0),False)
