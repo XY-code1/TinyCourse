@@ -508,7 +508,7 @@ void ATinyCourseGameMode::BeginPlay()
     if(!bAuditCapture||bReleaseCapture)
     {
         MenuPage=1; UGameplayStatics::SetGamePaused(this,true);
-        if(auto* PC=UGameplayStatics::GetPlayerController(this,0)){PC->bShowMouseCursor=true;PC->SetInputMode(FInputModeGameAndUI());}
+        if(auto* PC=UGameplayStatics::GetPlayerController(this,0)){PC->bShowMouseCursor=true;PC->bEnableClickEvents=true;PC->bEnableMouseOverEvents=true;PC->SetInputMode(FInputModeGameAndUI());}
     }
     else MenuPage=0;
 }
@@ -793,7 +793,7 @@ void ATinyCourseGameMode::HandleMenuAction(FName Action)
     auto* PC=UGameplayStatics::GetPlayerController(this,0);
     if(Action==TEXT("Start")||Action==TEXT("Resume"))
     {
-        MenuPage=0; UGameplayStatics::SetGamePaused(this,false); if(PC){PC->bShowMouseCursor=false;PC->SetInputMode(FInputModeGameOnly());}
+        MenuPage=0; UGameplayStatics::SetGamePaused(this,false); if(PC){PC->bShowMouseCursor=false;PC->bEnableClickEvents=false;PC->bEnableMouseOverEvents=false;PC->SetInputMode(FInputModeGameOnly());}
     }
     else if(Action==TEXT("Help")) MenuPage=2;
     else if(Action==TEXT("Graphics")) MenuPage=3;
@@ -816,7 +816,7 @@ void ATinyCourseGameMode::TogglePauseMenu()
     else
     {
         MenuPage=4; UGameplayStatics::SetGamePaused(this,true);
-        if(auto* PC=UGameplayStatics::GetPlayerController(this,0)){PC->bShowMouseCursor=true;PC->SetInputMode(FInputModeGameAndUI());}
+        if(auto* PC=UGameplayStatics::GetPlayerController(this,0)){PC->bShowMouseCursor=true;PC->bEnableClickEvents=true;PC->bEnableMouseOverEvents=true;PC->SetInputMode(FInputModeGameAndUI());}
     }
 }
 void ATinyCourseGameMode::UnlockYellowTrial()
